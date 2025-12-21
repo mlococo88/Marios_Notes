@@ -762,9 +762,10 @@
                     toggleLoader(true, "Converting HEIC...");
                     heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 }).then(jpgBlob => {
                         toggleLoader(false);
-                        // Re-assign name property to blob for consistency
-                        jpgBlob.name = (file.name ? file.name.replace(/\.[^/.]+$/, "") : "image") + ".jpg";
-                        this.processBlob(jpgBlob, true);
+                        // Re-assign name property to blob for consistency - FIXED to create proper File
+                        const name = (file.name ? file.name.replace(/\.[^/.]+$/, "") : "image") + ".jpg";
+                        const newFile = new File([jpgBlob], name, { type: "image/jpeg" });
+                        this.processBlob(newFile, true);
                     }).catch(e => {
                         toggleLoader(false);
                         alert("HEIC conversion failed. Please try a different photo.");
@@ -1007,13 +1008,14 @@
                 
                 const meta = this.createMeta(state.pendingId, Date.now());
                 const doOverlay = $('burn-toggle').checked;
+                const blobToUpload = state.pendingBlob; // Capture blob before closing modal
 
                 // OFFLINE HANDLING
                 if(!state.online) {
                     toggleLoader(true, "Saving Offline...");
                     await this.offlineMgr.addToOutbox({
                         id: state.pendingId,
-                        blob: state.pendingBlob,
+                        blob: blobToUpload,
                         meta: meta,
                         doOverlay: doOverlay,
                         type: 'photo'
@@ -1026,10 +1028,10 @@
 
                 // ONLINE HANDLING
                 toggleLoader(true, "Processing...");
-                this.closeCaptionModal();
+                this.closeCaptionModal(); // This clears state.pendingBlob, but we have blobToUpload
 
                 try {
-                    await this.uploadWorkflow(state.pendingBlob, meta, doOverlay);
+                    await this.uploadWorkflow(blobToUpload, meta, doOverlay);
                     showToast("Upload Complete");
                     this.switchTab('report');
                 } catch(e) {
