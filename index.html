@@ -150,34 +150,36 @@
         </div>
 
         <!-- TAB 2: REPORT -->
-        <div id="tab-report" class="tab-content flex flex-col h-full bg-white">
-            <!-- Toolbar -->
-            <div class="p-3 border-b border-slate-200 flex gap-2 overflow-x-auto no-scrollbar bg-white sticky top-0 z-10">
-                <div class="flex-1 relative">
-                    <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
-                    <input type="text" id="search-input" onkeyup="window.app.filterFeed()" placeholder="Search..." class="w-full pl-9 pr-3 py-2 bg-slate-100 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+        <div id="tab-report" class="tab-content h-full bg-white">
+            <div class="flex flex-col h-full">
+                <!-- Toolbar -->
+                <div class="p-3 border-b border-slate-200 flex gap-2 overflow-x-auto no-scrollbar bg-white sticky top-0 z-10 flex-none">
+                    <div class="flex-1 relative">
+                        <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                        <input type="text" id="search-input" onkeyup="window.app.filterFeed()" placeholder="Search..." class="w-full pl-9 pr-3 py-2 bg-slate-100 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    </div>
+                    <div class="flex bg-slate-100 rounded-lg p-1">
+                        <button onclick="window.app.setFilter('all')" id="filter-all" class="px-3 py-1.5 rounded text-xs font-bold transition bg-white shadow text-slate-800">All</button>
+                        <button onclick="window.app.setFilter('photo')" id="filter-photo" class="px-3 py-1.5 rounded text-xs font-bold transition text-slate-500 hover:text-slate-700">Photos</button>
+                        <button onclick="window.app.setFilter('note')" id="filter-note" class="px-3 py-1.5 rounded text-xs font-bold transition text-slate-500 hover:text-slate-700">Notes</button>
+                    </div>
                 </div>
-                <div class="flex bg-slate-100 rounded-lg p-1">
-                    <button onclick="window.app.setFilter('all')" id="filter-all" class="px-3 py-1.5 rounded text-xs font-bold transition bg-white shadow text-slate-800">All</button>
-                    <button onclick="window.app.setFilter('photo')" id="filter-photo" class="px-3 py-1.5 rounded text-xs font-bold transition text-slate-500 hover:text-slate-700">Photos</button>
-                    <button onclick="window.app.setFilter('note')" id="filter-note" class="px-3 py-1.5 rounded text-xs font-bold transition text-slate-500 hover:text-slate-700">Notes</button>
-                </div>
-            </div>
 
-            <!-- Feed -->
-            <div id="report-feed" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 pb-20">
-                <div class="flex flex-col items-center justify-center h-40 text-slate-400">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2"></div>
-                    <span class="text-xs">Loading data...</span>
+                <!-- Feed -->
+                <div id="report-feed" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 pb-20">
+                    <div class="flex flex-col items-center justify-center h-40 text-slate-400">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2"></div>
+                        <span class="text-xs">Loading data...</span>
+                    </div>
                 </div>
-            </div>
 
-            <!-- Floating Action for Export -->
-            <div class="absolute bottom-4 right-4 z-20">
-                <button onclick="document.getElementById('export-modal').classList.remove('hidden')" class="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-3 shadow-lg flex items-center gap-2 pr-5 transition transform active:scale-95">
-                    <i data-lucide="download" class="w-5 h-5"></i>
-                    <span class="text-sm font-bold">Export</span>
-                </button>
+                <!-- Floating Action for Export -->
+                <div class="absolute bottom-4 right-4 z-20">
+                    <button onclick="document.getElementById('export-modal').classList.remove('hidden')" class="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-3 shadow-lg flex items-center gap-2 pr-5 transition transform active:scale-95">
+                        <i data-lucide="download" class="w-5 h-5"></i>
+                        <span class="text-sm font-bold">Export</span>
+                    </button>
+                </div>
             </div>
         </div>
 
