@@ -33,6 +33,7 @@
 
         /* Sketch Canvas */
         canvas { touch-action: none; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
     </style>
 </head>
 <body class="text-gray-800">
@@ -43,7 +44,13 @@
             <h1 class="text-lg font-bold text-blue-800">Field Notes <span class="text-gray-800">by ML</span></h1>
             <p class="text-xs text-gray-500 cursor-pointer hover:text-blue-600" onclick="document.getElementById('settings-modal').classList.remove('hidden')" id="project-header">Project: Bridge-001</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-3">
+            <!-- Sync Indicator -->
+            <button id="sync-btn" onclick="window.triggerSync()" class="hidden flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-bold shadow-sm">
+                <span>☁️</span>
+                <span id="sync-count">0</span>
+            </button>
+            
             <div id="status-indicator" class="w-2 h-2 rounded-full bg-gray-400"></div>
             <button onclick="document.getElementById('settings-modal').classList.remove('hidden')" class="p-2 text-gray-500 hover:text-blue-600">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -84,33 +91,44 @@
             </div>
         </div>
 
-        <!-- Action Buttons (Camera & Sketch) -->
+        <!-- Action Buttons (Camera, Upload, Sketch) -->
         <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
             <div class="bg-gray-50 p-3 border-b border-gray-200 flex justify-between items-center">
                 <span class="font-bold text-gray-700">Capture Data</span>
                 <span class="text-xs text-gray-400 uppercase tracking-wider">Inputs</span>
             </div>
-            <div class="p-6 grid grid-cols-2 gap-4">
+            <div class="p-4 grid grid-cols-3 gap-2">
                 <!-- Camera Button -->
-                <label for="camera-input" class="cursor-pointer group relative flex flex-col items-center">
-                    <div class="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center shadow-xl group-hover:bg-blue-500 transition transform group-active:scale-95">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <label for="camera-input" class="cursor-pointer group relative flex flex-col items-center justify-center p-2 bg-blue-50 rounded-lg border border-blue-100 hover:bg-blue-100 transition">
+                    <div class="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center shadow-md group-hover:scale-105 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                         </svg>
                     </div>
-                    <span class="text-xs font-bold text-gray-600 mt-2">Add Photo</span>
+                    <span class="text-[10px] font-bold text-blue-700 mt-1" id="photo-capture-label">Camera</span>
                     <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
+                </label>
+
+                <!-- Upload Photo Button -->
+                <label for="upload-input" class="cursor-pointer group relative flex flex-col items-center justify-center p-2 bg-green-50 rounded-lg border border-green-100 hover:bg-green-100 transition">
+                    <div class="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center shadow-md group-hover:scale-105 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                    </div>
+                    <span class="text-[10px] font-bold text-green-700 mt-1">Upload</span>
+                    <input type="file" id="upload-input" accept="image/*" class="hidden">
                 </label>
                 
                 <!-- Sketch Button -->
-                <button onclick="window.openWhiteboard()" class="cursor-pointer group relative flex flex-col items-center">
-                    <div class="w-20 h-20 bg-purple-600 rounded-full flex items-center justify-center shadow-xl group-hover:bg-purple-500 transition transform group-active:scale-95">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <button onclick="window.openWhiteboard()" class="cursor-pointer group relative flex flex-col items-center justify-center p-2 bg-purple-50 rounded-lg border border-purple-100 hover:bg-purple-100 transition">
+                    <div class="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center shadow-md group-hover:scale-105 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                         </svg>
                     </div>
-                    <span class="text-xs font-bold text-gray-600 mt-2">Add Sketch</span>
+                    <span class="text-[10px] font-bold text-purple-700 mt-1">Sketch</span>
                 </button>
             </div>
             
@@ -240,7 +258,7 @@
         </button>
     </nav>
 
-    <!-- NEW: WHITEBOARD MODAL -->
+    <!-- WHITEBOARD MODAL -->
     <div id="whiteboard-modal" class="fixed inset-0 z-[60] bg-white hidden flex flex-col">
         <!-- Whiteboard Header -->
         <div class="bg-gray-100 p-3 border-b border-gray-300 flex justify-between items-center flex-none">
@@ -263,7 +281,7 @@
         </div>
     </div>
 
-    <!-- NEW: IMAGE DETAIL MODAL -->
+    <!-- IMAGE DETAIL MODAL -->
     <div id="image-detail-modal" class="fixed inset-0 z-[60] bg-black/95 hidden flex flex-col justify-center p-4">
         <div class="relative w-full max-w-4xl mx-auto flex flex-col h-full max-h-screen">
             <!-- Header -->
@@ -306,7 +324,7 @@
         </div>
     </div>
 
-    <!-- MODALS (Existing) -->
+    <!-- MODALS -->
     <div id="caption-modal" class="fixed inset-0 z-50 bg-black/90 hidden flex flex-col justify-center p-4">
         <div class="bg-white rounded-xl overflow-hidden shadow-2xl max-w-md mx-auto w-full">
             <div class="relative h-64 bg-gray-100 flex items-center justify-center">
@@ -321,7 +339,6 @@
                     <input type="text" id="modal-caption-title" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Title / Location (e.g. Girder 3)">
                     <textarea id="modal-caption-desc" class="w-full border border-gray-300 rounded-lg p-3 text-sm h-24 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none" placeholder="Detailed Description..."></textarea>
                 </div>
-                <!-- AI Button Removed Here -->
                 <div class="flex gap-3">
                     <button onclick="window.cancelUpload()" class="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg">Discard</button>
                     <button onclick="window.confirmUpload()" id="modal-save-btn" class="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow">Save & Upload</button>
@@ -347,9 +364,7 @@
                 <textarea id="editor-desc-input" class="w-full border border-gray-300 rounded-lg p-3 text-sm h-32 resize-none"></textarea>
                 
                 <div class="flex flex-col gap-2">
-                    <button onclick="window.regenerateOverlay()" id="editor-regen-btn" class="hidden w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-lg shadow text-xs flex items-center justify-center gap-2">
-                        <span>✨</span> Re-burn Overlay Text (Uses Original Photo)
-                    </button>
+                    <!-- Note: Regenerate overlay is complex without original raw blob in memory, so we simplify to metadata update only for this version -->
                     <button onclick="window.updateLogEntry()" id="editor-save-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow">Save Changes</button>
                 </div>
             </div>
@@ -376,17 +391,16 @@
         </div>
     </div>
     
-    <div id="st-rules" class="hidden">rules_version = '2'; service firebase.storage { match /b/{bucket}/o { match /artifacts/{appId}/{allPaths=**} { allow read, write: if request.auth != null; } } }</div>
     <div id="toast" class="fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-full shadow-lg text-sm font-bold opacity-0 transition-opacity duration-300 pointer-events-none z-[60]">Photo Added</div>
     <div id="loading-overlay" class="fixed inset-0 z-[60] bg-black/80 hidden flex flex-col items-center justify-center text-white"><div class="animate-spin rounded-full h-10 w-10 border-4 border-blue-500 border-t-transparent mb-4"></div><p id="loading-text" class="font-medium">Uploading...</p></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, query, where, onSnapshot, getDocs, deleteDoc, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, query, where, onSnapshot, getDocs, deleteDoc, updateDoc, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, listAll, getMetadata, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
-        import 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
         
         function saveAs(blob, filename) {
             const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
@@ -399,7 +413,7 @@
         let currentProject = localStorage.getItem('fc_active_project') || "Bridge-001";
         let knownProjects = new Set(JSON.parse(localStorage.getItem('fc_projects') || '["Bridge-001"]'));
         
-        let pendingBlob = null, pendingBase64 = null;
+        let pendingBlob = null;
         let browserPath = `artifacts/${appId}/public/data/files`; 
         let currentEditingItem = null, currentReportFilter = 'photo', currentSort = 'newest';
         let isSeriesMode = false, seriesPhotoQueue = [];
@@ -409,252 +423,580 @@
         
         // WHITEBOARD VARS
         let wbCanvas, wbCtx, isDrawing = false, lastX = 0, lastY = 0;
+        
+        // OFFLINE DB
+        let dbOffline = null;
+        const DB_NAME = 'fc_offline_db';
+        const DB_STORE = 'uploads';
 
-        // -- CORE FUNCTIONS MOVED TO TOP --
-        function blobToBase64(blob) { return new Promise((r,j) => { const reader=new FileReader(); reader.onloadend=()=>r(reader.result.split(',')[1]); reader.onerror=j; reader.readAsDataURL(blob); }); }
+        // -- UTILITY FUNCTIONS --
         function showToast(msg) { const t = document.getElementById('toast'); t.innerText=msg; t.classList.remove('opacity-0'); setTimeout(()=>t.classList.add('opacity-0'), 2000); }
         function updateStatus(s) { document.getElementById('status-indicator').className=`w-2 h-2 rounded-full ${s==='online'?'bg-green-500':'bg-red-500'}`; }
         function setLoading(a,t="Loading") { document.getElementById('loading-overlay').classList.toggle('hidden',!a); document.getElementById('loading-text').innerText=t; }
         
-        // Delete Raw File Helper
-        window.deleteRawFile = async (fullPath) => {
-            if(!confirm("Are you sure you want to permanently delete this file? This cannot be undone.")) return;
-            setLoading(true, "Deleting file...");
-            try {
-                await deleteObject(ref(storage, fullPath));
-                showToast("File deleted");
-                loadBrowser(browserPath); // Refresh current view
-            } catch(e) {
-                console.error(e);
-                alert("Delete failed: " + e.message);
-            } finally {
-                setLoading(false);
+        // -- EXPOSE FUNCTIONS TO WINDOW --
+        
+        window.switchTab = (tabId) => {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById(`tab-${tabId}`).classList.add('active');
+            document.getElementById(`nav-${tabId}`).classList.add('active');
+            
+            if (tabId === 'map') {
+                setTimeout(() => {
+                    if (mapInstance) mapInstance.invalidateSize();
+                    initMap();
+                }, 200);
             }
         };
 
-        // --- WHITEBOARD FUNCTIONS ---
-        window.openWhiteboard = () => {
-             document.getElementById('whiteboard-modal').classList.remove('hidden');
-             setTimeout(initWhiteboard, 100); // Allow render
-        };
-        
-        window.annotatePendingPhoto = async () => {
-             if(!pendingBlob) return alert("No photo to annotate");
-             
-             // Open whiteboard
-             document.getElementById('whiteboard-modal').classList.remove('hidden');
-             document.getElementById('caption-modal').classList.add('hidden'); // Hide caption modal
-             
-             setTimeout(() => {
-                 initWhiteboard();
-                 // Load pendingBlob into canvas
-                 const img = new Image();
-                 img.onload = () => {
-                     // Draw image to canvas, fitting within aspect ratio
-                     const canvas = document.getElementById('wb-canvas');
-                     const ctx = canvas.getContext('2d');
-                     
-                     // Fill white first
-                     ctx.fillStyle = "#ffffff";
-                     ctx.fillRect(0,0,canvas.width, canvas.height);
-                     
-                     // Draw image stretched to fill for now to be simple, 
-                     // or aspect fit? Let's fill for whiteboard feeling
-                     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                 };
-                 img.src = URL.createObjectURL(pendingBlob);
-             }, 100);
-        };
-
-        window.closeWhiteboard = () => {
-             document.getElementById('whiteboard-modal').classList.add('hidden');
-             // If we were annotating, show caption modal again
-             if(pendingBlob) document.getElementById('caption-modal').classList.remove('hidden');
-        };
-
-        function initWhiteboard() {
-            wbCanvas = document.getElementById('wb-canvas');
-            const wrapper = document.getElementById('wb-wrapper');
-            wbCanvas.width = wrapper.offsetWidth;
-            wbCanvas.height = wrapper.offsetHeight;
-            wbCtx = wbCanvas.getContext('2d');
-            
-            // Set white background immediately
-            wbCtx.fillStyle = "#ffffff";
-            wbCtx.fillRect(0, 0, wbCanvas.width, wbCanvas.height);
-            
-            wbCtx.lineJoin = 'round';
-            wbCtx.lineCap = 'round';
-            wbCtx.lineWidth = 2;
-            wbCtx.strokeStyle = '#000000';
-            
-            // Pointer Events (Unified)
-            wbCanvas.addEventListener('pointerdown', startDrawing);
-            wbCanvas.addEventListener('pointermove', draw);
-            wbCanvas.addEventListener('pointerup', stopDrawing);
-            wbCanvas.addEventListener('pointerout', stopDrawing);
-            
-            // UI Controls
-            document.getElementById('wb-color').onchange = (e) => wbCtx.strokeStyle = e.target.value;
-            document.getElementById('wb-size').oninput = (e) => wbCtx.lineWidth = e.target.value;
-        }
-
-        function startDrawing(e) {
-            isDrawing = true;
-            const rect = wbCanvas.getBoundingClientRect();
-            [lastX, lastY] = [e.clientX - rect.left, e.clientY - rect.top];
-        }
-
-        function draw(e) {
-            if (!isDrawing) return;
-            e.preventDefault(); // Stop scrolling
-            const rect = wbCanvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            
-            wbCtx.beginPath();
-            wbCtx.moveTo(lastX, lastY);
-            wbCtx.lineTo(x, y);
-            wbCtx.stroke();
-            [lastX, lastY] = [x, y];
-        }
-
-        function stopDrawing() {
-            isDrawing = false;
-        }
-        
-        window.clearWhiteboard = () => {
-             wbCtx.fillStyle = "#ffffff";
-             wbCtx.fillRect(0, 0, wbCanvas.width, wbCanvas.height);
-             // If annotating, re-draw original image? Too complex for now. Clear = blank page.
-        };
-        
-        window.saveWhiteboard = () => {
-            setLoading(true, "Processing Sketch...");
-            try {
-                if(!wbCanvas) throw new Error("Canvas not initialized");
-                
-                wbCanvas.toBlob((blob) => {
-                    setLoading(false);
-                    if(blob) {
-                        window.handleSketchSave(blob);
-                    } else {
-                        alert("Error saving canvas: blob is null");
-                    }
-                }, 'image/png'); // PNG preserves quality before burning
-            } catch (e) {
-                console.error(e);
-                setLoading(false);
-                alert("Error in saveWhiteboard: " + e.message);
-            }
-        };
-
-        window.handleSketchSave = (blob) => {
-            pendingBlob = blob; // This becomes the new "photo"
-            
-            // FORCE HIDE MODAL
-            document.getElementById('whiteboard-modal').classList.add('hidden');
-            
-            // Reset fields
-            document.getElementById('modal-img-preview').src = URL.createObjectURL(blob);
-            
-            document.querySelector('#caption-modal label').innerText = "Details";
-            document.getElementById('modal-save-btn').innerText = "Save & Upload";
-            document.getElementById('caption-modal').classList.remove('hidden');
-        };
-
-        // --- COMPASS ---
-        window.requestCompassPermission = async () => {
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                try {
-                    const perm = await DeviceOrientationEvent.requestPermission();
-                    if (perm === 'granted') {
-                        window.addEventListener('deviceorientation', handleOrientation);
-                        document.getElementById('compass-status').innerText = "Active";
-                    } else {
-                        alert("Permission denied");
-                    }
-                } catch(e) { alert(e); }
+        window.toggleSeriesMode = () => {
+            isSeriesMode = !isSeriesMode;
+            const btn = document.getElementById('series-mode-btn');
+            if(isSeriesMode) {
+                btn.classList.add('active');
+                btn.innerHTML = '<span id="series-icon">📸</span> Finish Series (' + seriesPhotoQueue.length + ')';
             } else {
-                alert("Not required on this device or not supported.");
-                window.addEventListener('deviceorientationabsolute', handleOrientation);
-                window.addEventListener('deviceorientation', handleOrientation);
+                // If we were in series mode and turned it off, do we upload? 
+                // Currently upload logic handles queue flushing in confirmUpload.
+                // Just reset UI here if empty.
+                if(seriesPhotoQueue.length === 0) {
+                    btn.classList.remove('active');
+                    btn.innerHTML = '<span id="series-icon">🔄</span> Enable Photo Series';
+                } else {
+                    // Force upload trigger if queue has items? 
+                    // Or just let user finish via next photo capture?
+                    // Let's assume user must capture one more or just turn it off to reset.
+                    // For simplicity, disabling just resets UI, queue is cleared in upload logic if not empty.
+                    btn.classList.remove('active');
+                    btn.innerHTML = '<span id="series-icon">🔄</span> Enable Photo Series';
+                }
             }
         };
 
-        function handleOrientation(e) {
-            let heading = null;
-            if(e.webkitCompassHeading) {
-                heading = e.webkitCompassHeading;
-            } else if (e.alpha !== null) {
-                // Approximate for Android if absolute is available, else relative
-                heading = 360 - e.alpha; 
+        window.handleCameraInput = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            setLoading(true, "Processing...");
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    // Create blob from image
+                    fetch(img.src).then(res => res.blob()).then(blob => {
+                        pendingBlob = blob;
+                        setLoading(false);
+                        
+                        // Series Mode Handling
+                        if (isSeriesMode) {
+                            seriesPhotoQueue.push({
+                                blob: pendingBlob,
+                                id: Date.now().toString(),
+                                timestamp: Date.now()
+                            });
+                            pendingBlob = null; // Clear pending for next
+                            
+                            // Update Button
+                            const btn = document.getElementById('series-mode-btn');
+                            btn.innerHTML = '<span id="series-icon">📸</span> Finish Series (' + seriesPhotoQueue.length + ')';
+                            showToast(`Photo ${seriesPhotoQueue.length} Added to Series`);
+                            
+                            // If user wants to finish, they click the button again? 
+                            // Or we pop the modal for the LAST photo? 
+                            // Let's just pop modal immediately for metadata entry which applies to whole series?
+                            // Logic: In series mode, we accumulate. How to finish?
+                            // Let's open modal for every photo? No that defeats purpose.
+                            // Let's open modal ONLY when series is done?
+                            // Current UI implies "Enable Series".
+                            // Let's trigger the modal now, but treating it as a "Batch".
+                            
+                            document.getElementById('modal-img-preview').src = img.src;
+                            document.getElementById('modal-caption-title').value = "";
+                            document.getElementById('modal-caption-desc').value = "";
+                            document.querySelector('#caption-modal label').innerText = `Batch Details (${seriesPhotoQueue.length} Photos)`;
+                            document.getElementById('modal-save-btn').innerText = "Upload Series";
+                            document.getElementById('caption-modal').classList.remove('hidden');
+                        } else {
+                            // Single Photo
+                            document.getElementById('modal-img-preview').src = img.src;
+                            document.getElementById('modal-caption-title').value = "";
+                            document.getElementById('modal-caption-desc').value = "";
+                            document.querySelector('#caption-modal label').innerText = "Photo Details";
+                            document.getElementById('modal-save-btn').innerText = "Save & Upload";
+                            document.getElementById('caption-modal').classList.remove('hidden');
+                        }
+                    });
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+            event.target.value = ''; // Reset input
+        };
+
+        window.cancelUpload = () => {
+            pendingBlob = null;
+            if(!isSeriesMode) seriesPhotoQueue = [];
+            document.getElementById('caption-modal').classList.add('hidden');
+        };
+
+        window.toggleNewProjectInput = () => {
+            const div = document.getElementById('new-project-div');
+            div.classList.toggle('hidden');
+        };
+
+        window.createNewProject = () => {
+            const val = document.getElementById('new-project-input').value.trim();
+            if(val) {
+                addProjectToSet(val);
+                window.switchProject(val);
+                document.getElementById('new-project-input').value = "";
+                window.toggleNewProjectInput();
+            }
+        };
+
+        window.switchProject = (p) => {
+            currentProject = p;
+            localStorage.setItem('fc_active_project', p);
+            updateProjectHeader();
+            renderProjectOptions();
+            loadReport();
+        };
+
+        window.deleteEntry = async (id, path) => {
+            if(!confirm("Delete this entry?")) return;
+            setLoading(true, "Deleting...");
+            try {
+                await deleteDoc(doc(db, `artifacts/${appId}/public/data/images`, id));
+                // Try delete storage if exists
+                if(path) {
+                    try { await deleteObject(ref(storage, path)); } catch(e){ console.warn("Storage delete fail", e); }
+                }
+                showToast("Entry Deleted");
+            } catch(e) { console.error(e); alert("Error deleting"); }
+            setLoading(false);
+        };
+        
+        // --- LOGIC FUNCTIONS ---
+        
+        const loadBrowser = async function(path) {
+            browserPath = path;
+            const grid = document.getElementById('browser-grid');
+            document.getElementById('browser-path').innerText = path;
+            grid.innerHTML = '<div class="col-span-full text-center text-gray-400 text-sm">Scanning...</div>';
+            try {
+                const res = await listAll(ref(storage, path));
+                grid.innerHTML = "";
+                
+                // Folders
+                res.prefixes.forEach(p => {
+                    const div = document.createElement('div');
+                    div.className = "bg-yellow-50 border border-yellow-200 rounded p-3 text-center cursor-pointer hover:bg-yellow-100";
+                    div.onclick = () => loadBrowser(p.fullPath);
+                    div.innerHTML = `<div class="text-2xl mb-1">📁</div><div class="text-xs truncate font-bold text-yellow-800">${p.name}</div>`;
+                    grid.appendChild(div);
+                });
+                
+                // Files
+                for (const item of res.items) {
+                    // Only fetch URL for images to save bandwidth, else show generic icon
+                    const isImg = item.name.match(/\.(jpg|jpeg|png|webp)$/i);
+                    let content = '';
+                    if(isImg) {
+                        const url = await getDownloadURL(item);
+                        content = `<img src="${url}" class="w-full h-full object-cover">`;
+                    } else {
+                        content = `<div class="w-full h-full flex items-center justify-center text-gray-400 text-2xl">📄</div>`;
+                    }
+                    
+                    const div = document.createElement('div');
+                    div.className = "bg-white border border-gray-200 rounded overflow-hidden shadow-sm relative group";
+                    div.innerHTML = `
+                        <div class="h-24 bg-gray-100 relative">
+                            ${content}
+                            <button onclick="event.preventDefault(); event.stopPropagation(); window.deleteRawFile('${item.fullPath}')" class="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow-sm hover:bg-red-700 z-20">✕</button>
+                        </div>
+                        <div class="p-2 text-[10px] text-gray-500 truncate">${item.name}</div>
+                    `;
+                    // Click to download/open
+                    div.onclick = async () => {
+                         const url = await getDownloadURL(item);
+                         window.open(url, '_blank');
+                    };
+                    grid.appendChild(div);
+                }
+                if(res.prefixes.length===0 && res.items.length===0) grid.innerHTML = '<div class="col-span-full text-center text-gray-300 text-sm py-4">Empty Folder</div>';
+            } catch(e) {
+                console.warn("Browser Error", e.code);
+                grid.innerHTML = `<div class="col-span-full text-center text-red-400 text-xs py-4">Error: ${e.code}</div>`;
+            }
+        };
+
+        window.browserUp = () => {
+            const parts = browserPath.split('/');
+            if(parts.length > 1) {
+                parts.pop();
+                loadBrowser(parts.join('/'));
+            }
+        };
+        
+        window.refreshBrowser = () => loadBrowser(browserPath);
+        window.loadBrowser = loadBrowser; // Expose
+
+        const renderReport = (items) => {
+            const feed = document.getElementById('report-feed');
+            feed.innerHTML = "";
+            let filtered = items.filter(i => currentReportFilter === 'all' || i.type === currentReportFilter);
+            filtered = filtered.sort((a,b) => currentSort === 'newest' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp);
+
+            if(filtered.length === 0) { feed.innerHTML = `<div class="text-center text-gray-400 py-10">No items found.</div>`; return; }
+
+            filtered.forEach(item => {
+                const div = document.createElement('div');
+                div.className = "bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex";
+                
+                let left = item.type === 'note' 
+                    ? `<div class="w-16 bg-yellow-50 flex-shrink-0 flex items-center justify-center text-2xl">📝</div>` 
+                    : `<div class="w-1/3 bg-gray-100 flex-shrink-0 relative cursor-pointer group" onclick="window.openImageDetail('${item.id}')">
+                        <img src="${item.url}" class="absolute inset-0 w-full h-full object-cover">
+                        <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition"></div>
+                        <div class="absolute bottom-1 right-1 bg-black/50 text-white text-[10px] px-1 rounded">🔍</div>
+                       </div>`;
+                       
+                let downloadBtn = '';
+                if (item.type === 'photo') {
+                    // Just triggering download of the processed image
+                    downloadBtn += `<a href="${item.url}" download="photo_${item.id}.jpg" target="_blank" class="text-xs text-green-600 font-bold hover:underline">Download</a>`;
+                }
+
+                div.innerHTML = `${left}
+                <div class="p-3 flex-1 flex flex-col justify-between">
+                    <div>
+                        <div class="text-xs text-gray-400 mb-1 flex justify-between">
+                            <span>${item.dateString}</span>
+                            ${item.lat ? `<span class="text-blue-500">📍 ${item.lat.toFixed(4)}, ${item.lng.toFixed(4)}</span>` : ''}
+                        </div>
+                        <p class="text-sm font-medium line-clamp-2">${item.caption || item.text}</p>
+                    </div>
+                    <div class="flex justify-end gap-2 mt-2 items-center">
+                        ${downloadBtn}
+                        <button onclick="window.openEditorModal('${item.id}','${item.type}')" class="text-xs text-blue-500 font-bold hover:underline">Edit</button>
+                        <button onclick="window.deleteEntry('${item.id}','${item.storagePath}')" class="text-xs text-red-500 font-bold hover:underline">Delete</button>
+                    </div>
+                </div>`;
+                feed.appendChild(div);
+            });
+        };
+
+        const initMap = () => {
+            if (typeof L === 'undefined' || !document.getElementById('map-container')) return;
+            if (!mapInstance) {
+                mapInstance = L.map('map-container').setView([39.8, -98.5], 4);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapInstance);
+                markerGroup = L.layerGroup().addTo(mapInstance);
+            }
+            markerGroup.clearLayers();
+            let bounds = [];
+            cachedItems.forEach(item => {
+                if (item.lat && item.lng) {
+                    const m = L.marker([item.lat, item.lng]).bindPopup(item.caption || item.text || "Log Entry");
+                    markerGroup.addLayer(m);
+                    bounds.push([item.lat, item.lng]);
+                }
+            });
+            if(bounds.length) mapInstance.fitBounds(bounds, {padding:[50,50]});
+        };
+
+        const loadReport = () => {
+            if(!db || !currentProject) return; 
+            const q = query(collection(db, `artifacts/${appId}/public/data/images`), where("projectId", "==", currentProject));
+            onSnapshot(q, (s) => { 
+                cachedItems = []; s.forEach(d=>cachedItems.push(d.data())); 
+                renderReport(cachedItems); 
+                if(document.getElementById('tab-map').classList.contains('active')) initMap();
+            }, (error) => {
+                console.error("Error fetching documents: ", error);
+            });
+        };
+        
+        window.setSortOrder = (v) => {
+            currentSort = v;
+            renderReport(cachedItems);
+        };
+        
+        window.setReportFilter = (filter) => {
+            currentReportFilter = filter;
+            // Update UI buttons
+            const btns = { 'photo': 'nav-log-photos', 'note': 'nav-log-notes', 'all': 'nav-log-all' };
+            for (const key in btns) {
+                const el = document.getElementById(btns[key]);
+                if(el) { 
+                    el.classList.remove('active'); 
+                    if(key===filter) el.classList.add('active'); 
+                }
             }
             
-            if(heading !== null) {
-                currentHeading = heading;
-                const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-                const ix = Math.round(heading / 45) % 8;
-                const el = document.getElementById('compass-status');
-                if(el) {
-                    el.innerText = `${Math.round(heading)}° ${dirs[ix]}`;
-                    el.classList.remove('text-gray-400');
-                    el.classList.add('text-blue-600');
-                }
-            }
-        }
+            // Toggle download buttons visibility
+            const btnPhotos = document.getElementById('download-photos-btn');
+            const btnNotes = document.getElementById('download-notes-btn');
+            const btnRaw = document.getElementById('download-raw-photos-btn');
+            
+            if(btnPhotos) btnPhotos.classList.toggle('hidden', filter === 'note');
+            if(btnNotes) btnNotes.classList.toggle('hidden', filter === 'photo');
+            if(btnRaw) btnRaw.classList.toggle('hidden', filter === 'note');
+            
+            renderReport(cachedItems);
+        };
+        
+        // --- DOWNLOAD & EXPORT ---
+        
+        window.generateReportPDF = async () => {
+             const { jsPDF } = window.jspdf;
+             if (!jsPDF) return alert("PDF Lib not loaded");
+             
+             setLoading(true, "Generating PDF...");
+             const doc = new jsPDF();
+             const projectTitle = currentProject || "Field Report";
+             
+             let y = 20;
+             doc.setFontSize(18);
+             doc.text(`Field Inspection Report: ${projectTitle}`, 14, y);
+             y += 10;
+             doc.setFontSize(10);
+             doc.text(`Generated: ${new Date().toLocaleString()}`, 14, y);
+             y += 20;
+             
+             // Sort chronologically for report
+             const items = [...cachedItems].sort((a,b) => a.timestamp - b.timestamp);
+             
+             for (const item of items) {
+                 if (y > 250) { doc.addPage(); y = 20; }
+                 
+                 // Date Header
+                 doc.setFontSize(10);
+                 doc.setTextColor(100);
+                 doc.text(item.dateString, 14, y);
+                 y += 5;
+                 
+                 // Content
+                 if (item.type === 'photo') {
+                     try {
+                         // Fetch image to add to PDF
+                         const imgData = await fetch(item.url).then(r => r.arrayBuffer());
+                         const format = item.url.includes('.png') ? 'PNG' : 'JPEG';
+                         
+                         // Constrain dimensions (max width 180, max height 100)
+                         const props = doc.getImageProperties(new Uint8Array(imgData));
+                         const ratio = props.height / props.width;
+                         let w = 180; 
+                         let h = w * ratio;
+                         if(h > 120) { h = 120; w = h / ratio; }
+                         
+                         doc.addImage(new Uint8Array(imgData), format, 14, y, w, h);
+                         y += h + 5;
+                     } catch(e) {
+                         doc.text("[Image Load Failed]", 14, y);
+                         y += 10;
+                     }
+                 }
+                 
+                 // Caption/Text
+                 doc.setFontSize(12);
+                 doc.setTextColor(0);
+                 const text = item.type === 'note' ? (item.title ? item.title + "\n" + item.detailedDesc : item.text) : (item.caption || "No Caption");
+                 const splitText = doc.splitTextToSize(text, 180);
+                 doc.text(splitText, 14, y);
+                 y += (splitText.length * 5) + 10;
+                 
+                 // GPS Line
+                 if(item.lat) {
+                     doc.setFontSize(8);
+                     doc.setTextColor(150);
+                     doc.text(`GPS: ${item.lat}, ${item.lng}`, 14, y - 5);
+                 }
+                 
+                 // Separator
+                 doc.setDrawColor(200);
+                 doc.line(14, y-2, 196, y-2);
+                 y += 10;
+             }
+             
+             doc.save(`${projectTitle}_Report.pdf`);
+             setLoading(false);
+        };
 
-        // --- WEATHER FETCHING ---
-        async function fetchWeather(lat, lng) {
-            try {
-                const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&temperature_unit=fahrenheit`);
-                const data = await r.json();
-                if(data.current_weather) {
-                    const code = data.current_weather.weathercode;
-                    // Simple code mapping
-                    let desc = "Unknown";
-                    if(code === 0) desc = "Clear Sky";
-                    else if(code < 4) desc = "Partly Cloudy";
-                    else if(code < 50) desc = "Foggy";
-                    else if(code < 80) desc = "Rain";
-                    else desc = "Storm/Snow";
-                    
-                    currentWeather = { temp: `${data.current_weather.temperature}°F`, desc: desc };
-                    
-                    // Update UI
-                    const wxEl = document.getElementById('weather-status');
-                    if(wxEl) {
-                        wxEl.innerText = `${desc}, ${data.current_weather.temperature}°F`;
-                        wxEl.classList.remove('text-gray-400');
-                        wxEl.classList.add('text-blue-600');
-                    }
-                }
-            } catch(e) { console.warn("Weather fetch failed", e); }
-        }
+        window.generateCSVReport = () => {
+             if(!cachedItems.length) return alert("No data");
+             let csv = "ID,Type,Date,Latitude,Longitude,Heading,Caption,Description,ImageURL\n";
+             cachedItems.forEach(i => {
+                 const cleanDesc = (i.detailedDesc || "").replace(/,/g, " ");
+                 const cleanCap = (i.caption || i.text || "").replace(/,/g, " ");
+                 csv += `${i.id},${i.type},${i.dateString},${i.lat||""},${i.lng||""},${i.heading||""},"${cleanCap}","${cleanDesc}",${i.url||""}\n`;
+             });
+             const blob = new Blob([csv], {type: 'text/csv'});
+             saveAs(blob, `${currentProject}_data.csv`);
+        };
+        
+        window.downloadAllPhotosZip = async () => {
+             const zip = new JSZip(); // Global JSZip Usage
+             const photos = cachedItems.filter(i => i.type === 'photo');
+             if(!photos.length) return alert("No photos");
+             
+             setLoading(true, `Zipping ${photos.length} photos...`);
+             const folder = zip.folder(currentProject);
+             
+             for (const p of photos) {
+                 try {
+                     const blob = await fetch(p.url).then(r => r.blob());
+                     folder.file(`${p.photoNumber || p.id}.jpg`, blob);
+                 } catch(e) { console.error(e); }
+             }
+             
+             const content = await zip.generateAsync({type:"blob"});
+             saveAs(content, `${currentProject}_photos.zip`);
+             setLoading(false);
+        };
+        
+        window.downloadAllRawPhotosZip = async () => {
+             const zip = new JSZip(); // Global JSZip Usage
+             const photos = cachedItems.filter(i => i.type === 'photo' && i.rawStoragePath);
+             if(!photos.length) return alert("No raw photos found");
+             
+             setLoading(true, `Fetching ${photos.length} raw files...`);
+             const folder = zip.folder(currentProject + "_RAW");
+             
+             for (const p of photos) {
+                 try {
+                     const url = await getDownloadURL(ref(storage, p.rawStoragePath));
+                     const blob = await fetch(url).then(r => r.blob());
+                     folder.file(`raw_${p.photoNumber || p.id}.jpg`, blob);
+                 } catch(e) { console.warn("Raw fetch fail", e); }
+             }
+             
+             const content = await zip.generateAsync({type:"blob"});
+             saveAs(content, `${currentProject}_raw.zip`);
+             setLoading(false);
+        };
+        
+        window.downloadNotesTextReport = () => {
+            const notes = cachedItems.filter(i => i.type === 'note');
+            if(!notes.length) return alert("No notes");
+            let txt = `NOTES LOG: ${currentProject}\nGenerated: ${new Date().toLocaleString()}\n\n`;
+            notes.forEach(n => {
+                txt += `[${n.dateString}]\n${n.text}\nGPS: ${n.lat}, ${n.lng}\n-------------------\n\n`;
+            });
+            const blob = new Blob([txt], {type:'text/plain'});
+            saveAs(blob, `${currentProject}_notes.txt`);
+        };
+
+        // --- EDITING & DETAIL MODALS ---
+        
+        window.openImageDetail = (id) => {
+             const item = cachedItems.find(i => i.id === id);
+             if(!item) return;
+             
+             document.getElementById('detail-img').src = item.url;
+             document.getElementById('detail-caption').innerText = item.caption || "No Caption";
+             document.getElementById('detail-date').innerText = item.dateString;
+             document.getElementById('detail-project').innerText = item.projectId;
+             document.getElementById('detail-id').innerText = item.id;
+             
+             const gpsLink = document.getElementById('detail-gps-link');
+             if(item.lat) {
+                 gpsLink.innerText = `${item.lat.toFixed(6)}, ${item.lng.toFixed(6)}`;
+                 gpsLink.href = `https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`;
+             } else {
+                 gpsLink.innerText = "N/A";
+                 gpsLink.removeAttribute('href');
+             }
+             
+             // Buttons
+             document.getElementById('detail-download-btn').onclick = () => saveAs(fetch(item.url).then(r=>r.blob()), `img_${id}.jpg`);
+             
+             // Raw button logic
+             const rawBtn = document.getElementById('detail-download-raw-btn');
+             if(item.rawStoragePath) {
+                 rawBtn.classList.remove('hidden');
+                 rawBtn.onclick = async () => {
+                     try {
+                         const url = await getDownloadURL(ref(storage, item.rawStoragePath));
+                         window.open(url, '_blank');
+                     } catch(e) { alert("Raw file not found"); }
+                 };
+             } else {
+                 rawBtn.classList.add('hidden');
+             }
+
+             document.getElementById('image-detail-modal').classList.remove('hidden');
+        };
+        
+        window.closeImageDetail = () => document.getElementById('image-detail-modal').classList.add('hidden');
+        
+        window.openEditorModal = (id, type) => {
+             const item = cachedItems.find(i => i.id === id);
+             if(!item) return;
+             currentEditingItem = item;
+             
+             document.getElementById('editor-modal').classList.remove('hidden');
+             document.getElementById('editor-title-input').value = item.title || "";
+             document.getElementById('editor-desc-input').value = item.detailedDesc || item.caption || item.text || "";
+             
+             const prev = document.getElementById('editor-photo-preview');
+             if(type === 'photo') {
+                 prev.classList.remove('hidden');
+                 document.getElementById('editor-preview-img').src = item.url;
+             } else {
+                 prev.classList.add('hidden');
+             }
+        };
+        
+        window.closeEditorModal = () => {
+             document.getElementById('editor-modal').classList.add('hidden');
+             currentEditingItem = null;
+        };
+        
+        window.updateLogEntry = async () => {
+             if(!currentEditingItem) return;
+             const newTitle = document.getElementById('editor-title-input').value;
+             const newDesc = document.getElementById('editor-desc-input').value;
+             let newCaption = newTitle ? `${newTitle} - ${newDesc}` : newDesc;
+             
+             setLoading(true, "Updating...");
+             try {
+                 await updateDoc(doc(db, `artifacts/${appId}/public/data/images`, currentEditingItem.id), {
+                     title: newTitle,
+                     detailedDesc: newDesc,
+                     caption: newCaption, // Update caption for backward compatibility
+                     text: newCaption     // Update text if it's a note
+                 });
+                 showToast("Entry Updated");
+                 window.closeEditorModal();
+             } catch(e) {
+                 console.error(e);
+                 alert("Update failed");
+             }
+             setLoading(false);
+        };
 
         // --- IMAGE PROCESSING (BURN TEXT) ---
         function processImageWithOverlay(blob, meta) {
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => { // Added reject
                 const img = new Image();
                 const url = URL.createObjectURL(blob);
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    // Keep original dimensions
                     const w = img.naturalWidth;
                     const h = img.naturalHeight;
                     canvas.width = w;
                     canvas.height = h;
                     const ctx = canvas.getContext('2d');
                     
-                    // Fill white background for sketches to handle transparency
                     ctx.fillStyle = "#ffffff";
                     ctx.fillRect(0, 0, w, h);
-
-                    // Draw original
                     ctx.drawImage(img, 0, 0);
 
-                    // Dynamic Styling - Reduced font size
-                    const fontSize = Math.floor(h * 0.022); // Reduced from 0.03 to 0.022
+                    const fontSize = Math.floor(h * 0.022);
                     const padding = Math.floor(fontSize * 0.5);
                     const lineHeight = Math.floor(fontSize * 1.4);
 
@@ -687,13 +1029,11 @@
                     ctx.fillText(photoText, w - padding, padding/2);
 
                     // --- BOTTOM: Metadata Stack ---
-                    // Prepare lines
                     const dateStr = new Date(meta.timestamp).toLocaleString();
                     const gpsStr = meta.lat ? `${meta.lat.toFixed(6)}, ${meta.lng.toFixed(6)}` : "No GPS Data";
                     const wxStr = meta.weather ? `${meta.weather.desc} (${meta.weather.temp})` : "Weather: N/A";
                     const capStr = meta.caption || "No Caption";
                     
-                    // Format Compass
                     let hdgStr = "";
                     if(meta.heading !== null && meta.heading !== undefined) {
                         const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -701,664 +1041,52 @@
                         hdgStr = ` | HDG: ${Math.round(meta.heading)}° ${dirs[ix]}`;
                     }
 
-                    // Helper for text wrapping
                     const getLines = (ctx, text, maxWidth) => {
                         const words = text.split(" ");
                         const lines = [];
                         let currentLine = words[0];
-
                         for (let i = 1; i < words.length; i++) {
                             const word = words[i];
                             const width = ctx.measureText(currentLine + " " + word).width;
-                            if (width < maxWidth) {
-                                currentLine += " " + word;
-                            } else {
-                                lines.push(currentLine);
-                                currentLine = word;
-                            }
+                            if (width < maxWidth) { currentLine += " " + word; } 
+                            else { lines.push(currentLine); currentLine = word; }
                         }
                         lines.push(currentLine);
                         return lines;
                     };
 
-                    // Calculate max width for text (width - 2*padding)
                     const maxTextWidth = w - (padding * 2);
-
-                    // Wrap the caption
-                    const notePrefix = "NOTE: ";
-                    const wrappedNoteLines = getLines(ctx, notePrefix + capStr, maxTextWidth);
-
-                    const fixedLines = [
-                        `DATE: ${dateStr}`,
-                        `LOC: ${gpsStr}${hdgStr}`, // Added Compass Here
-                        `WX: ${wxStr}`
-                    ];
+                    const wrappedNoteLines = getLines(ctx, "NOTE: " + capStr, maxTextWidth);
+                    const fixedLines = [`DATE: ${dateStr}`, `LOC: ${gpsStr}${hdgStr}`, `WX: ${wxStr}`];
 
                     const totalLineCount = fixedLines.length + wrappedNoteLines.length;
                     const bottomHeight = (totalLineCount * lineHeight) + (padding * 2);
                     
-                    // Bottom Background
                     ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
                     ctx.fillRect(0, h - bottomHeight, w, bottomHeight);
 
-                    // Draw Lines
                     ctx.textAlign = "left";
                     ctx.fillStyle = "#ffffff";
-                    
                     let currentY = h - bottomHeight + padding;
                     
-                    // Draw Fixed Lines
-                    fixedLines.forEach(line => {
-                        ctx.fillText(line, padding, currentY);
-                        currentY += lineHeight;
-                    });
-
-                    // Draw Wrapped Note Lines
-                    ctx.fillStyle = "#fbbf24"; // Amber
-                    wrappedNoteLines.forEach(line => {
-                        ctx.fillText(line, padding, currentY);
-                        currentY += lineHeight;
-                    });
-
-                    // Series Index (if exists, put it under Photo ID top right)
-                    if(meta.seriesIndex) {
-                         ctx.font = `bold ${Math.floor(fontSize*0.7)}px sans-serif`;
-                         const seriesText = meta.seriesIndex;
-                         const seriesY = projBgH + (padding/2);
-                         
-                         // Small bg for series
-                         const sMetrics = ctx.measureText(seriesText);
-                         ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-                         ctx.fillRect(w - sMetrics.width - (padding*2), projBgH, sMetrics.width + (padding*2), lineHeight);
-
-                         ctx.fillStyle = "#fbbf24";
-                         ctx.textAlign = "right";
-                         ctx.fillText(seriesText, w - padding, seriesY + (padding/4));
-                    }
+                    fixedLines.forEach(line => { ctx.fillText(line, padding, currentY); currentY += lineHeight; });
+                    ctx.fillStyle = "#fbbf24"; 
+                    wrappedNoteLines.forEach(line => { ctx.fillText(line, padding, currentY); currentY += lineHeight; });
 
                     canvas.toBlob((b) => {
                         resolve(b);
                         URL.revokeObjectURL(url);
                     }, 'image/jpeg', 0.85);
                 };
+                img.onerror = (err) => reject(err); // Safety reject
                 img.src = url;
             });
         }
-
-        // --- NEW: OPEN IMAGE DETAIL ---
-        window.openImageDetail = (id) => {
-            const item = cachedItems.find(i => i.id === id);
-            if (!item) return;
-
-            document.getElementById('detail-img').src = item.url;
-            document.getElementById('detail-caption').innerText = item.caption || "No Caption";
-            document.getElementById('detail-date').innerText = item.dateString || "Unknown";
-            
-            const gpsText = (item.lat && item.lng) ? `${item.lat.toFixed(6)}, ${item.lng.toFixed(6)}` : "No GPS Data";
-            const gpsLink = document.getElementById('detail-gps-link');
-            gpsLink.innerText = gpsText;
-            
-            if (item.lat && item.lng) {
-                gpsLink.href = `https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`;
-                gpsLink.classList.remove('pointer-events-none', 'text-gray-500');
-                gpsLink.classList.add('text-blue-400', 'hover:underline');
-            } else {
-                gpsLink.href = "#";
-                gpsLink.classList.add('pointer-events-none', 'text-gray-500');
-                gpsLink.classList.remove('text-blue-400', 'hover:underline');
-            }
-            
-            document.getElementById('detail-project').innerText = item.projectId || "";
-            document.getElementById('detail-id').innerText = item.id.substring(8); // Short ID
-            
-            // Set download button handler
-            document.getElementById('detail-download-btn').onclick = () => window.downloadSinglePhoto(id);
-            
-            // Handle Raw Download Button Visibility
-            const rawBtn = document.getElementById('detail-download-raw-btn');
-            if (item.rawStoragePath) {
-                rawBtn.classList.remove('hidden');
-                rawBtn.onclick = () => window.downloadRawPhoto(id);
-            } else {
-                rawBtn.classList.add('hidden');
-            }
-
-            document.getElementById('image-detail-modal').classList.remove('hidden');
-        };
-
-        window.closeImageDetail = () => {
-            document.getElementById('image-detail-modal').classList.add('hidden');
-        };
-
-        async function loadBrowser(path) {
-            browserPath = path;
-            const grid = document.getElementById('browser-grid');
-            document.getElementById('browser-path').innerText = path;
-            grid.innerHTML = '<div class="col-span-full text-center text-gray-400 text-sm">Scanning...</div>';
-            try {
-                const res = await listAll(ref(storage, path));
-                grid.innerHTML = "";
-                res.prefixes.forEach(p => {
-                    const div = document.createElement('div');
-                    div.className = "bg-yellow-50 border border-yellow-200 rounded p-3 text-center cursor-pointer hover:bg-yellow-100";
-                    div.onclick = () => window.loadBrowser(p.fullPath);
-                    div.innerHTML = `<div class="text-2xl mb-1">📁</div><div class="text-xs truncate font-bold text-yellow-800">${p.name}</div>`;
-                    grid.appendChild(div);
-                });
-                for (const item of res.items) {
-                    const url = await getDownloadURL(item);
-                    const div = document.createElement('div');
-                    div.className = "bg-white border border-gray-200 rounded overflow-hidden shadow-sm relative group";
-                    div.innerHTML = `
-                        <div class="h-24 bg-gray-100 relative">
-                            <img src="${url}" class="w-full h-full object-cover">
-                            <button onclick="event.preventDefault(); event.stopPropagation(); window.deleteRawFile('${item.fullPath}')" class="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow-sm hover:bg-red-700 z-20">✕</button>
-                        </div>
-                        <div class="p-2 text-[10px] text-gray-500 truncate">${item.name}</div>
-                        <a href="${url}" target="_blank" class="absolute inset-0 z-10"></a>
-                    `;
-                    grid.appendChild(div);
-                }
-                if(res.prefixes.length===0 && res.items.length===0) grid.innerHTML = '<div class="col-span-full text-center text-gray-300 text-sm py-4">Empty Folder</div>';
-            } catch(e) {
-                console.warn("Browser Error", e.code);
-                grid.innerHTML = `<div class="col-span-full text-center text-red-400 text-xs py-4">Error: ${e.code}</div>`;
-            }
-        }
-
-        async function _generatePDF_Core() {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF({ unit: 'mm', format: 'letter' });
-            const margin = 15; const pW = 215.9; let y = margin;
-            
-            const sortedItems = [...cachedItems].sort((a,b) => a.timestamp - b.timestamp);
-            const photos = sortedItems.filter(i => i.type === 'photo');
-            const notes = sortedItems.filter(i => i.type === 'note');
-
-            doc.setFontSize(20); doc.text(`Structural Inspection Report`, pW/2, y, {align:'center'}); y+=10;
-            doc.setFontSize(14); doc.text(`Project: ${currentProject}`, pW/2, y, {align:'center'}); y+=15;
-
-            if (photos.length > 0) {
-                doc.setFontSize(16); doc.text("Photo Log", margin, y); y+=10;
-                const loadedPhotos = await Promise.all(photos.map(async p => {
-                    try {
-                        const resp = await fetch(p.url); const blob = await resp.blob();
-                        const base64 = await new Promise((r) => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img,0,0); r({data:c.toDataURL('image/jpeg', 0.8).split(',')[1], w:img.naturalWidth, h:img.naturalHeight}); }; img.src = URL.createObjectURL(blob); });
-                        return { ...p, base64: base64.data, w: base64.w, h: base64.h };
-                    } catch { return { ...p, base64: null }; }
-                }));
-
-                const targetW = 80;
-                for (let i = 0; i < loadedPhotos.length; i++) {
-                    const p = loadedPhotos[i];
-                    let photoH = 60;
-                    if(p.w && p.h) photoH = targetW * (p.h / p.w);
-                    if(photoH > 100) photoH = 100;
-                    
-                    const rowH = photoH + 25;
-                    if (y + rowH > 270) { doc.addPage(); y = margin; }
-
-                    const col = i % 2;
-                    const xPos = margin + (col * (targetW + 10));
-                    if (col === 0 && i > 0) y += rowH; 
-
-                    if(p.base64) doc.addImage(p.base64, 'JPEG', xPos, y, targetW, photoH);
-                    doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.text(`Photo #${p.id.substring(8)}`, xPos, y+photoH+5);
-                    doc.setFont("helvetica", "normal"); const split = doc.splitTextToSize(p.caption, targetW); doc.text(split, xPos, y+photoH+10);
-                }
-                y += 80; 
-            }
-
-            if (notes.length > 0) {
-                doc.addPage(); y = margin; doc.setFontSize(16); doc.text("Field Notes", margin, y); y+=10; doc.setFontSize(10);
-                notes.forEach(n => {
-                    const text = doc.splitTextToSize(`[${n.dateString}] ${n.text}`, pW - (margin*2));
-                    if (y + (text.length*5) > 270) { doc.addPage(); y = margin; }
-                    doc.text(text, margin, y); y += (text.length * 5) + 5;
-                });
-            }
-            doc.save(`Report_${currentProject}.pdf`);
-        }
-
-        function initMap() {
-            if (typeof L === 'undefined' || !document.getElementById('map-container')) return;
-            if (!mapInstance) {
-                mapInstance = L.map('map-container').setView([39.8, -98.5], 4);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapInstance);
-                markerGroup = L.layerGroup().addTo(mapInstance);
-            }
-            markerGroup.clearLayers();
-            let bounds = [];
-            cachedItems.forEach(item => {
-                if (item.lat && item.lng) {
-                    const m = L.marker([item.lat, item.lng]).bindPopup(item.caption || item.text);
-                    markerGroup.addLayer(m);
-                    bounds.push([item.lat, item.lng]);
-                }
-            });
-            if(bounds.length) mapInstance.fitBounds(bounds, {padding:[50,50]});
-        }
-
-        function renderReport(items) {
-            const feed = document.getElementById('report-feed');
-            feed.innerHTML = "";
-            let filtered = items.filter(i => currentReportFilter === 'all' || i.type === currentReportFilter);
-            filtered = filtered.sort((a,b) => currentSort === 'newest' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp);
-
-            if(filtered.length === 0) { feed.innerHTML = `<div class="text-center text-gray-400 py-10">No items found.</div>`; return; }
-
-            filtered.forEach(item => {
-                const div = document.createElement('div');
-                div.className = "bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex";
-                
-                // UPDATED VISUAL SIDE FOR PHOTO TO OPEN MODAL
-                let left = item.type === 'note' 
-                    ? `<div class="w-16 bg-yellow-50 flex-shrink-0 flex items-center justify-center text-2xl">📝</div>` 
-                    : `<div class="w-1/3 bg-gray-100 flex-shrink-0 relative cursor-pointer group" onclick="window.openImageDetail('${item.id}')">
-                        <img src="${item.url}" class="absolute inset-0 w-full h-full object-cover">
-                        <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition"></div>
-                        <div class="absolute bottom-1 right-1 bg-black/50 text-white text-[10px] px-1 rounded">🔍</div>
-                       </div>`;
-                       
-                // Added Download Button Logic (Both Standard and Raw)
-                let downloadBtn = '';
-                if (item.type === 'photo') {
-                    downloadBtn += `<button onclick="window.downloadSinglePhoto('${item.id}')" class="text-xs text-green-600 font-bold hover:underline">Download</button>`;
-                    if (item.rawStoragePath) {
-                        downloadBtn += `<button onclick="window.downloadRawPhoto('${item.id}')" class="text-xs text-orange-600 font-bold hover:underline ml-2">Raw</button>`;
-                    }
-                }
-
-                div.innerHTML = `${left}
-                <div class="p-3 flex-1 flex flex-col justify-between">
-                    <div>
-                        <div class="text-xs text-gray-400 mb-1 flex justify-between">
-                            <span>${item.dateString}</span>
-                            ${item.lat ? `<span class="text-blue-500">📍 ${item.lat.toFixed(4)}, ${item.lng.toFixed(4)}</span>` : ''}
-                        </div>
-                        <p class="text-sm font-medium">${item.caption || item.text}</p>
-                    </div>
-                    <div class="flex justify-end gap-2 mt-2 items-center">
-                        ${downloadBtn}
-                        <button onclick="window.openEditorModal('${item.id}','${item.type}')" class="text-xs text-blue-500 font-bold hover:underline">Edit</button>
-                        <button onclick="window.deleteEntry('${item.id}','${item.storagePath}')" class="text-xs text-red-500 font-bold hover:underline">Delete</button>
-                    </div>
-                </div>`;
-                feed.appendChild(div);
-            });
-        }
-
-        function loadReport() {
-            const q = query(collection(db, `artifacts/${appId}/public/data/images`), where("projectId", "==", currentProject));
-            onSnapshot(q, (s) => { 
-                cachedItems = []; s.forEach(d=>cachedItems.push(d.data())); 
-                renderReport(cachedItems); 
-                if(document.getElementById('tab-map').style.display === 'block') initMap();
-            }, (error) => {
-                console.error("Error fetching documents: ", error);
-                showToast("Error fetching data");
-            });
-        }
-
-        function filterReport(txt) {
-            const lower = txt.toLowerCase();
-            const cards = document.querySelectorAll('#report-feed > div');
-            cards.forEach(c => { c.style.display = c.innerText.toLowerCase().includes(lower) ? 'flex' : 'none'; });
-        }
-
-        // --- GLOBAL EXPORTS (Before Init) ---
-        window.loadBrowser = loadBrowser; 
-        window.cancelUpload = () => { 
-            if(isSeriesMode && confirm("Discard queue?")) seriesPhotoQueue=[]; 
-            document.getElementById('caption-modal').classList.add('hidden'); 
-        };
-        
-        window.toggleSeriesMode = () => {
-            isSeriesMode = !isSeriesMode;
-            const btn = document.getElementById('series-mode-btn');
-            const label = document.getElementById('photo-capture-label');
-
-            btn.classList.toggle('active', isSeriesMode);
-            btn.innerHTML = isSeriesMode ? '<span id="series-icon">⏺</span> Stop Recording' : '<span id="series-icon">🔄</span> Enable Photo Series';
-            label.innerText = isSeriesMode ? `Series Active: ${seriesPhotoQueue.length} photos` : 'Tap to Capture Photo';
-            
-            if (!isSeriesMode && seriesPhotoQueue.length > 0) {
-                openBatchCaptionModal();
-            } else if (!isSeriesMode && seriesPhotoQueue.length === 0) {
-                label.innerText = 'Tap to Capture Photo';
-            }
-        };
-
-        window.handleCameraInput = (e) => {
-            const file = e.target.files[0]; if(!file) return; pendingBlob=file;
-            e.target.value = ""; // Clear input immediately
-            
-            if (isSeriesMode) {
-                const id = Date.now().toString();
-                seriesPhotoQueue.push({ id, blob: pendingBlob, base64: null, timestamp: new Date() });
-                showToast(`Photo #${seriesPhotoQueue.length} Added`);
-                document.getElementById('photo-capture-label').innerText = `Series Active: ${seriesPhotoQueue.length} photos`;
-                
-                blobToBase64(file).then(b => { 
-                    const item = seriesPhotoQueue.find(x=>x.id === id);
-                    if(item) item.base64 = b; 
-                });
-                return;
-            }
-            const url = URL.createObjectURL(file);
-            document.getElementById('modal-img-preview').src=url;
-            document.getElementById('modal-caption-title').value="";
-            document.getElementById('modal-caption-desc').value="";
-            // FIX: Use 'label' instead of 'h3' to match HTML structure
-            document.querySelector('#caption-modal label').innerText = "Photo Caption";
-            document.getElementById('modal-save-btn').innerText = "Save & Upload";
-            document.getElementById('caption-modal').classList.remove('hidden');
-            blobToBase64(file).then(b=>{pendingBase64=b});
-        };
-
-        function openBatchCaptionModal() {
-             document.getElementById('modal-img-preview').src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgc3Ryb2tlLXdpZHRoPSIxLjUiIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTUgMTdoMTRhMiAyIDAgMCAwIDItMlY3YTIgMiAwIDAgMC0yLTJINWEyIDIgMCAwIDAtMiAydjEwYTIgMiAwIDAgMCAyIDJ6TTggMTBiLjg5IDAgMS42NDguNTIgMiAxdjJhMiAyIDAgMCAwIDIgMEg2YTIgMiAwIDAgMC0yLTJWOGEuOTEgLjkxIDAgMCAxIC4wNy0uMzdjLjA0LS4xLjE0LS4yLjItLjI3LjEtLjA3LjIyLS4xMS4zNi0uMTRIMiIgLz48L3N2Zz4=';
-             document.getElementById('modal-caption-title').value = "";
-             document.getElementById('modal-caption-desc').value = "";
-             document.querySelector('#caption-modal label').innerText = `Batch Caption for ${seriesPhotoQueue.length} Photos`;
-             document.getElementById('modal-save-btn').innerText = `Upload ${seriesPhotoQueue.length} Photos`;
-             document.getElementById('caption-modal').classList.remove('hidden');
-        }
-        
-        window.openBatchCaptionModal = openBatchCaptionModal; // Expose
-
-        window.openEditorModal = (id, type) => { 
-            currentEditingItem = cachedItems.find(i=>i.id===id); 
-            document.getElementById('editor-modal').classList.remove('hidden'); 
-            
-            if(type === 'photo') {
-                document.getElementById('editor-photo-preview').classList.remove('hidden');
-                document.getElementById('editor-preview-img').src = currentEditingItem.url;
-                
-                // Populate split fields
-                document.getElementById('editor-title-input').value = currentEditingItem.title || "";
-                document.getElementById('editor-desc-input').value = currentEditingItem.detailedDesc || currentEditingItem.caption;
-                
-                // Show/Hide Regen button
-                const regenBtn = document.getElementById('editor-regen-btn');
-                if(currentEditingItem.rawStoragePath) {
-                    regenBtn.classList.remove('hidden');
-                } else {
-                    regenBtn.classList.add('hidden');
-                }
-            } else {
-                document.getElementById('editor-photo-preview').classList.add('hidden');
-                document.getElementById('editor-title-input').value = "";
-                document.getElementById('editor-desc-input').value = currentEditingItem.text;
-                document.getElementById('editor-regen-btn').classList.add('hidden');
-            }
-        };
-        
-        window.closeEditorModal = () => document.getElementById('editor-modal').classList.add('hidden');
-        
-        window.updateLogEntry = async () => { 
-            const newTitle = document.getElementById('editor-title-input').value.trim();
-            const newDesc = document.getElementById('editor-desc-input').value.trim();
-            
-            let updateData = {};
-            if(currentEditingItem.type === 'photo') {
-                let newCaption = newDesc;
-                if(newTitle) newCaption = `${newTitle} - ${newDesc}`;
-                updateData = { caption: newCaption, title: newTitle, detailedDesc: newDesc };
-            } else {
-                updateData = { text: newDesc };
-            }
-            
-            await setDoc(doc(db, `artifacts/${appId}/public/data/images`, currentEditingItem.id), updateData, {merge:true}); 
-            window.closeEditorModal(); 
-        };
-        
-        window.deleteEntry = async (id, path) => { if(confirm("Delete?")) { await deleteDoc(doc(db, `artifacts/${appId}/public/data/images`, id)); if(path) deleteObject(ref(storage, path)); } };
-        window.switchTab = (id) => { 
-            document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active')); document.getElementById(`tab-${id}`).classList.add('active'); 
-            document.querySelectorAll('.nav-item').forEach(e=>e.classList.remove('active','text-blue-600')); document.getElementById(`nav-${id}`).classList.add('active','text-blue-600');
-            if(id==='map') setTimeout(initMap, 200);
-            if(id==='files') loadBrowser(browserPath);
-            // Sketch tab logic removed
-        }
-        window.updateProjectID = (v) => { currentProject=v; document.getElementById('project-header').innerText=`Project: ${v}`; loadReport(); };
-        window.toggleNewProjectInput = () => document.getElementById('new-project-div').classList.toggle('hidden');
-        window.createNewProject = () => { const v=document.getElementById('new-project-input').value; if(v){ addProjectToSet(v); window.switchProject(v); } };
-        window.switchProject = (v) => { currentProject=v; localStorage.setItem('fc_active_project',v); updateProjectHeader(); loadReport(); };
-        window.setSortOrder = (o) => { currentSort=o; renderReport(cachedItems); };
-        window.browserUp = () => { const p=browserPath.split('/'); if(p.length>1){p.pop();loadBrowser(p.join('/'));} };
-        window.refreshBrowser = () => loadBrowser(browserPath);
-        window.copyStorageRules = () => navigator.clipboard.writeText(document.getElementById('st-rules').innerText);
-        window.importLegacyFiles = async () => { if(confirm("Scan storage?")) { const scan=async(r,pn)=>{const l=await listAll(r);for(const f of l.items){const id=f.name.split('.')[0];const u=await getDownloadURL(f);await setDoc(doc(db,`artifacts/${appId}/public/data/images`,id),{id,projectId:pn||"Unsorted",url:u,storagePath:f.fullPath,caption:"Imported",timestamp:Date.now(),dateString:"Imported"},{merge:true});}for(const p of l.prefixes){addProjectToSet(p.name);await scan(p,p.name);}}; await scan(ref(storage,`artifacts/${appId}/public/data/files`),"Unsorted"); alert("Done"); } };
-        
-        window.setReportFilter = (filter) => {
-            currentReportFilter = filter;
-            const btns = { 'photo': 'nav-log-photos', 'note': 'nav-log-notes', 'all': 'nav-log-all' };
-            for (const key in btns) {
-                const el = document.getElementById(btns[key]);
-                if(el) { el.classList.remove('active'); if(key===filter) el.classList.add('active'); }
-            }
-            const btnPhotos = document.getElementById('download-photos-btn');
-            const btnNotes = document.getElementById('download-notes-btn');
-            const btnRaw = document.getElementById('download-raw-photos-btn');
-            
-            if(btnPhotos) btnPhotos.classList.toggle('hidden', filter === 'note');
-            if(btnNotes) btnNotes.classList.toggle('hidden', filter === 'photo');
-            if(btnRaw) btnRaw.classList.toggle('hidden', filter === 'note');
-            
-            renderReport(cachedItems);
-        };
-
-        window.generateReportPDF = async () => {
-            setLoading(true, "Generating Report...");
-            try { await _generatePDF_Core(); } catch(e) { console.error(e); alert("PDF Error"); } finally { setLoading(false); }
-        };
-
-        window.downloadAllPhotosZip = async () => {
-            const photos = cachedItems.filter(i => i.type === 'photo');
-            if (photos.length === 0) return alert("No photos.");
-            setLoading(true, "Zipping...");
-            try {
-                const zip = new JSZip();
-                const promises = photos.map(async p => { if(p.storagePath) { const r=await fetch(p.url); const b=await r.blob(); zip.file(`${p.projectId}_${p.id}.jpg`, b); } });
-                await Promise.all(promises);
-                const c = await zip.generateAsync({type:"blob"});
-                saveAs(c, `${currentProject}_Photos.zip`);
-            } catch(e) { console.error(e); alert("Zip Failed"); } finally { setLoading(false); }
-        };
-        
-        window.downloadAllRawPhotosZip = async () => {
-            const photos = cachedItems.filter(i => i.type === 'photo' && i.rawStoragePath);
-            if (photos.length === 0) return alert("No raw photos found for this project.");
-            setLoading(true, "Zipping Raw Files...");
-            try {
-                const zip = new JSZip();
-                const promises = photos.map(async p => {
-                     // Need to get download URL for raw path first
-                     const url = await getDownloadURL(ref(storage, p.rawStoragePath));
-                     const r = await fetch(url);
-                     const b = await r.blob();
-                     zip.file(`${p.projectId}_${p.id}_RAW.jpg`, b);
-                });
-                await Promise.all(promises);
-                const c = await zip.generateAsync({type:"blob"});
-                saveAs(c, `${currentProject}_Raw_Photos.zip`);
-            } catch(e) { console.error(e); alert("Raw Zip Failed: " + e.message); } finally { setLoading(false); }
-        };
-
-        // NEW: Download Single Photo
-        window.downloadSinglePhoto = async (id) => {
-            const item = cachedItems.find(i => i.id === id);
-            if (!item || !item.url) return alert("Photo not found.");
-            
-            try {
-                setLoading(true, "Downloading...");
-                const resp = await fetch(item.url);
-                const blob = await resp.blob();
-                saveAs(blob, `${item.projectId}_${item.id}.jpg`);
-            } catch(e) {
-                console.error(e);
-                alert("Download failed.");
-            } finally {
-                setLoading(false);
-            }
-        };
-        
-        // NEW: Download RAW Photo
-        window.downloadRawPhoto = async (id) => {
-            const item = cachedItems.find(i => i.id === id);
-            if (!item || !item.rawStoragePath) return alert("Raw photo not found.");
-
-            try {
-                setLoading(true, "Fetching Raw Photo...");
-                const url = await getDownloadURL(ref(storage, item.rawStoragePath));
-                const resp = await fetch(url);
-                const blob = await resp.blob();
-                saveAs(blob, `${item.projectId}_${item.id}_RAW.jpg`);
-            } catch(e) {
-                console.error(e);
-                alert("Download failed.");
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        // NEW: Generate CSV Report
-        window.generateCSVReport = () => {
-            if (cachedItems.length === 0) return alert("No data to export.");
-            
-            // Sort by timestamp (oldest to newest usually better for raw data, but matching sort order is fine)
-            // Let's stick to chronological order for raw data exports as it's standard
-            const sorted = [...cachedItems].sort((a, b) => a.timestamp - b.timestamp);
-
-            let csv = "ID,Type,Date,Time,Project,Photo_Number,Title,Description,Latitude,Longitude,Heading,Weather,Image_URL\n";
-            
-            const clean = (text) => {
-                if (!text) return "";
-                // Escape quotes by doubling them, wrap field in quotes
-                return `"${String(text).replace(/"/g, '""')}"`; 
-            };
-
-            sorted.forEach(item => {
-                const d = new Date(item.timestamp);
-                const dateStr = d.toLocaleDateString();
-                const timeStr = d.toLocaleTimeString();
-                
-                const desc = item.detailedDesc || item.caption || item.text || "";
-                const wx = item.weather ? `${item.weather.desc} ${item.weather.temp}` : "";
-                const hdg = item.heading !== null && item.heading !== undefined ? Math.round(item.heading) : "";
-
-                const row = [
-                    item.id,
-                    item.type,
-                    clean(dateStr),
-                    clean(timeStr),
-                    clean(item.projectId),
-                    item.photoNumber || "",
-                    clean(item.title),
-                    clean(desc),
-                    item.lat || "",
-                    item.lng || "",
-                    hdg,
-                    clean(wx),
-                    clean(item.url)
-                ].join(",");
-                
-                csv += row + "\n";
-            });
-
-            saveAs(new Blob([csv], {type: 'text/csv;charset=utf-8'}), `${currentProject}_Export.csv`);
-        };
-
-        window.downloadNotesTextReport = () => {
-            const notes = cachedItems.filter(i => i.type === 'note');
-            if (notes.length === 0) return alert("No notes.");
-            let txt = `NOTES REPORT - ${currentProject}\n\n`;
-            notes.forEach(n => { txt += `[${n.dateString}]\n${n.text}\n-----------------\n`; });
-            saveAs(new Blob([txt],{type:'text/plain'}), `${currentProject}_Notes.txt`);
-        };
-
-        window.regenerateOverlay = async () => {
-            if(!currentEditingItem || !currentEditingItem.rawStoragePath) return;
-            if(!confirm("This will permanently overwrite the photo text with your new edits. Continue?")) return;
-            
-            setLoading(true, "Regenerating Overlay...");
-            try {
-                // 1. Get raw image URL
-                const rawUrl = await getDownloadURL(ref(storage, currentEditingItem.rawStoragePath));
-                const rawResp = await fetch(rawUrl);
-                const rawBlob = await rawResp.blob();
-                
-                // 2. Get new text
-                const newTitle = document.getElementById('editor-title-input').value.trim();
-                const newDesc = document.getElementById('editor-desc-input').value.trim();
-                let newCaption = newDesc;
-                if(newTitle) newCaption = `${newTitle} - ${newDesc}`;
-                
-                // 3. Process
-                const meta = {
-                    projectId: currentEditingItem.projectId,
-                    id: currentEditingItem.id,
-                    timestamp: currentEditingItem.timestamp,
-                    lat: currentEditingItem.lat,
-                    lng: currentEditingItem.lng,
-                    weather: currentEditingItem.weather,
-                    caption: newCaption,
-                    seriesIndex: currentEditingItem.seriesIndex,
-                    photoNumber: String(currentEditingItem.photoNumber || "").padStart(3, '0'),
-                    heading: currentEditingItem.heading // Preserve heading if available
-                };
-                const newImageBlob = await processImageWithOverlay(rawBlob, meta);
-                
-                // 4. Upload (Overwrite existing)
-                const processedRef = ref(storage, currentEditingItem.storagePath);
-                await uploadBytes(processedRef, newImageBlob); // Removed explicit contentType
-                
-                // 5. Get fresh URL & Update Firestore
-                const newUrl = await getDownloadURL(processedRef);
-                await setDoc(doc(db, `artifacts/${appId}/public/data/images`, currentEditingItem.id), {
-                    caption: newCaption,
-                    title: newTitle,
-                    detailedDesc: newDesc,
-                    url: newUrl
-                }, {merge: true});
-                
-                // 6. Refresh UI with cache busting
-                document.getElementById('editor-preview-img').src = newUrl + '?t=' + Date.now(); 
-                
-                showToast("Overlay Updated!");
-            } catch(e) {
-                console.error(e);
-                alert("Regeneration Failed: " + e.message);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        // Helper to sanitize project IDs for storage paths
-        // function sanitizeFilename(name) { return name.replace(/[^a-z0-9]/gi, '_').toLowerCase(); }
-        
-        // Delete Raw File Helper
-        window.deleteRawFile = async (fullPath) => {
-            if(!confirm("Are you sure you want to permanently delete this file? This cannot be undone.")) return;
-            setLoading(true, "Deleting file...");
-            try {
-                await deleteObject(ref(storage, fullPath));
-                showToast("File deleted");
-                loadBrowser(browserPath); // Refresh current view
-            } catch(e) {
-                console.error(e);
-                alert("Delete failed: " + e.message);
-            } finally {
-                setLoading(false);
-            }
-        };
 
         window.confirmUpload = async () => {
              if(!user) return alert("Error: No user found.");
              let itemsToProcess = [];
              
-             // Get Caption Parts
              const title = document.getElementById('modal-caption-title').value.trim();
              const desc = document.getElementById('modal-caption-desc').value.trim();
              let caption = desc;
@@ -1374,65 +1102,83 @@
                     seriesIndex: `Photo ${index + 1} of ${seriesPhotoQueue.length}`
                  }));
                  seriesPhotoQueue = [];
-                 document.getElementById('photo-capture-label').innerText = "Tap to Capture Photo";
              } else if (pendingBlob) {
-                 itemsToProcess.push({ blob: pendingBlob, id: Date.now().toString(), caption: caption, timestamp: new Date(), seriesIndex: null });
+                 itemsToProcess.push({ blob: pendingBlob, id: Date.now().toString(), caption: caption, timestamp: Date.now(), seriesIndex: null });
                  pendingBlob = null;
              } else { return alert("No photo ready."); }
              
              setLoading(true, `Processing & Uploading ${itemsToProcess.length} files...`);
              const doBurn = document.getElementById('burn-text-toggle').checked;
              
-             // Calculate max photo number
              const existingPhotos = cachedItems.filter(i => i.type === 'photo');
              const maxNum = existingPhotos.reduce((max, item) => Math.max(max, item.photoNumber || 0), 0);
-
-             try {
-                 const uploads = itemsToProcess.map(async (item, index) => {
-                     let finalBlob = item.blob;
-                     const thisNum = maxNum + index + 1;
-                     const photoIdStr = String(thisNum).padStart(3, '0');
-                     
-                     // 1. Upload RAW - CHANGED to use flat structure
-                     // Removed sanitizeFilename - use currentProject directly
-                     const rawPath = `artifacts/${appId}/public/data/files/${currentProject}/raw_${item.id}.jpg`;
-                     await uploadBytes(ref(storage, rawPath), item.blob, { contentType: 'image/jpeg' });
-
-                     // 2. Burn text if toggle is on
-                     if (doBurn) {
+             
+             const processItem = async (item, index) => {
+                 const thisNum = maxNum + index + 1;
+                 const photoIdStr = String(thisNum).padStart(3, '0');
+                 let rawPath = `artifacts/${appId}/public/data/files/${currentProject}/raw_${item.id}.jpg`;
+                 let processedPath = `artifacts/${appId}/public/data/files/${currentProject}/${item.id}.jpg`;
+                 let finalBlob = item.blob;
+                 let rawBlob = item.blob;
+                 
+                 if (doBurn) {
+                    try {
                         const meta = {
-                            projectId: currentProject,
-                            id: item.id,
-                            timestamp: item.timestamp,
-                            lat: currentLocation?.lat,
-                            lng: currentLocation?.lng,
-                            weather: currentWeather,
-                            caption: item.caption,
-                            seriesIndex: item.seriesIndex,
-                            photoNumber: photoIdStr,
-                            heading: currentHeading // Add heading to metadata
+                            projectId: currentProject, id: item.id, timestamp: item.timestamp,
+                            lat: currentLocation?.lat, lng: currentLocation?.lng, weather: currentWeather,
+                            caption: item.caption, seriesIndex: item.seriesIndex, photoNumber: photoIdStr, heading: currentHeading
                         };
                         finalBlob = await processImageWithOverlay(item.blob, meta);
-                     }
+                    } catch (e) {
+                        console.warn("Overlay failed, using raw", e);
+                    }
+                 }
+                 
+                 const docPayload = {
+                     id: item.id, type:'photo', projectId:currentProject, storagePath: processedPath, rawStoragePath: rawPath,
+                     caption: item.caption, title: title, detailedDesc: desc, timestamp:Date.now(), dateString:new Date().toLocaleString(), 
+                     lat:currentLocation?.lat || null, lng:currentLocation?.lng || null, photoNumber: thisNum, heading: currentHeading
+                 };
 
-                     // Upload Processed - CHANGED to use flat structure
-                     // Removed sanitizeFilename - use currentProject directly
-                     const path = `artifacts/${appId}/public/data/files/${currentProject}/${item.id}.jpg`;
-                     const snap = await uploadBytes(ref(storage, path), finalBlob, { contentType: 'image/jpeg' });
+                 const uploadPromise = async () => {
+                     if (!navigator.onLine) throw new Error("Offline");
+                     await uploadBytes(ref(storage, rawPath), rawBlob, { contentType: 'image/jpeg' });
+                     const snap = await uploadBytes(ref(storage, processedPath), finalBlob, { contentType: 'image/jpeg' });
                      const url = await getDownloadURL(snap.ref);
-                     
-                     await setDoc(doc(db, `artifacts/${appId}/public/data/images`, item.id), {
-                         id: item.id, type:'photo', projectId:currentProject, url, storagePath:path, caption:item.caption, title:title, detailedDesc:desc, timestamp:Date.now(), dateString:new Date().toLocaleString(), lat:currentLocation?.lat || null, lng:currentLocation?.lng || null, photoNumber: thisNum, rawStoragePath: rawPath, heading: currentHeading
-                     });
-                 });
-                 await Promise.all(uploads);
-                 addProjectToSet(currentProject);
-                 document.getElementById('caption-modal').classList.add('hidden');
-                 isSeriesMode = false;
-                 document.getElementById('series-mode-btn').classList.remove('active');
-                 document.getElementById('series-mode-btn').innerHTML = '<span id="series-icon">🔄</span> Enable Photo Series';
-                 switchTab('report');
-             } catch(e) { alert("Upload Failed: " + e.message); } finally { setLoading(false); }
+                     await setDoc(doc(db, `artifacts/${appId}/public/data/images`, item.id), { ...docPayload, url: url });
+                     return true;
+                 };
+
+                 // Race against 15s timeout
+                 const timeoutPromise = new Promise((_, reject) => 
+                     setTimeout(() => reject(new Error("Timeout")), 15000)
+                 );
+
+                 try {
+                     await Promise.race([uploadPromise(), timeoutPromise]);
+                 } catch (err) {
+                     // *** ERROR HANDLING DIAGNOSTICS ***
+                     if (err.code === 'storage/unauthorized') {
+                        alert(`PERMISSION DENIED:\n\nFirebase blocked this upload.\n\nSince your other app works, you likely need to ENABLE ANONYMOUS AUTH in the Firebase Console (Authentication > Sign-in method).\n\nOr check Storage Rules.`);
+                        throw err; // Re-throw to stop processing loop if needed or just let it save offline
+                     } else if (err.code === 'storage/canceled') {
+                        alert("Upload canceled.");
+                     } else {
+                        console.warn(`Upload failed for ${item.id}. Saving offline.`, err);
+                     }
+                     saveToOfflineQueue({ ...docPayload, blob: rawBlob, finalBlob: finalBlob, firestoreData: docPayload });
+                 }
+             };
+
+             await Promise.all(items.map((item, i) => processItem(item, i)));
+             
+             addProjectToSet(currentProject);
+             document.getElementById('caption-modal').classList.add('hidden');
+             isSeriesMode = false;
+             document.getElementById('series-mode-btn').classList.remove('active');
+             document.getElementById('series-mode-btn').innerHTML = '<span id="series-icon">🔄</span> Enable Photo Series';
+             setLoading(false);
+             window.switchTab('report');
         };
 
         window.confirmQuickNote = async () => { 
@@ -1449,98 +1195,204 @@
              document.getElementById('quick-note-title').value="";
              document.getElementById('quick-note-desc').value="";
              loadReport();
+             window.switchTab('report');
         };
         
         function addProjectToSet(p){ knownProjects.add(p); localStorage.setItem('fc_projects', JSON.stringify(Array.from(knownProjects))); renderProjectOptions(); }
         function renderProjectOptions() { const s=document.getElementById('project-select'); s.innerHTML=''; Array.from(knownProjects).sort().forEach(p=>{const o=document.createElement('option');o.value=p;o.text=p;if(p===currentProject)o.selected=true;s.appendChild(o)}); }
         function updateProjectHeader() { document.getElementById('project-header').innerText=`Project: ${currentProject}`; }
 
-        async function syncProjectList() {
-            try {
-                // Changed from 'files' to 'images' or ensure consistency? 
-                // The previous prompt said to use 'files'.
-                const rootRef = ref(storage, `artifacts/${appId}/public/data/files`);
-                const res = await listAll(rootRef);
-                res.prefixes.forEach((folderRef) => {
-                    // folderRef.name is the sanitized project name.
-                    // We might want to store the mapping if possible, but for now just adding it.
-                    addProjectToSet(folderRef.name);
-                });
-            } catch (e) {
-                console.warn("Project sync failed", e);
+        // --- WHITEBOARD ---
+        window.openWhiteboard = () => { document.getElementById('whiteboard-modal').classList.remove('hidden'); setTimeout(initWhiteboard, 100); };
+        window.annotatePendingPhoto = () => {
+             if(!pendingBlob) return alert("No photo to annotate");
+             document.getElementById('whiteboard-modal').classList.remove('hidden');
+             document.getElementById('caption-modal').classList.add('hidden');
+             setTimeout(() => {
+                 initWhiteboard();
+                 const img = new Image();
+                 img.onload = () => {
+                     wbCtx.drawImage(img, 0, 0, wbCanvas.width, wbCanvas.height);
+                 };
+                 img.src = URL.createObjectURL(pendingBlob);
+             }, 100);
+        };
+        window.closeWhiteboard = () => {
+             document.getElementById('whiteboard-modal').classList.add('hidden');
+             if(pendingBlob) document.getElementById('caption-modal').classList.remove('hidden');
+        };
+        function initWhiteboard() {
+            wbCanvas = document.getElementById('wb-canvas');
+            const wrapper = document.getElementById('wb-wrapper');
+            wbCanvas.width = wrapper.offsetWidth; wbCanvas.height = wrapper.offsetHeight;
+            wbCtx = wbCanvas.getContext('2d');
+            wbCtx.fillStyle = "#ffffff"; wbCtx.fillRect(0, 0, wbCanvas.width, wbCanvas.height);
+            wbCtx.lineJoin = 'round'; wbCtx.lineCap = 'round'; wbCtx.lineWidth = 2; wbCtx.strokeStyle = '#000000';
+            wbCanvas.addEventListener('pointerdown', startDrawing);
+            wbCanvas.addEventListener('pointermove', draw);
+            wbCanvas.addEventListener('pointerup', stopDrawing);
+        }
+        function startDrawing(e) { isDrawing = true; const r = wbCanvas.getBoundingClientRect(); [lastX, lastY] = [e.clientX - r.left, e.clientY - r.top]; }
+        function draw(e) { if (!isDrawing) return; e.preventDefault(); const r = wbCanvas.getBoundingClientRect(); const x = e.clientX - r.left; const y = e.clientY - r.top; wbCtx.beginPath(); wbCtx.moveTo(lastX, lastY); wbCtx.lineTo(x, y); wbCtx.stroke(); [lastX, lastY] = [x, y]; }
+        function stopDrawing() { isDrawing = false; }
+        window.clearWhiteboard = () => { wbCtx.fillStyle = "#ffffff"; wbCtx.fillRect(0, 0, wbCanvas.width, wbCanvas.height); };
+        window.saveWhiteboard = () => {
+            wbCanvas.toBlob((blob) => {
+                pendingBlob = blob;
+                document.getElementById('whiteboard-modal').classList.add('hidden');
+                document.getElementById('modal-img-preview').src = URL.createObjectURL(blob);
+                document.querySelector('#caption-modal label').innerText = "Details";
+                document.getElementById('caption-modal').classList.remove('hidden');
+            }, 'image/png');
+        };
+        
+        // --- OFFLINE & SYNC ---
+        function initDB() {
+            const req = indexedDB.open(DB_NAME, 1);
+            req.onupgradeneeded = (e) => { const d = e.target.result; if(!d.objectStoreNames.contains(DB_STORE)) d.createObjectStore(DB_STORE, { keyPath: 'id' }); };
+            req.onsuccess = (e) => { dbOffline = e.target.result; updateSyncCount(); };
+        }
+        function saveToOfflineQueue(item) {
+            if(!dbOffline) return;
+            const tx = dbOffline.transaction(DB_STORE, 'readwrite');
+            tx.objectStore(DB_STORE).put(item);
+            tx.oncomplete = () => { updateSyncCount(); showToast("Saved to Device (Offline)"); };
+        }
+        function updateSyncCount() {
+            if(!dbOffline) return;
+            const tx = dbOffline.transaction(DB_STORE, 'readonly');
+            const req = tx.objectStore(DB_STORE).count();
+            req.onsuccess = () => { const n = req.result; document.getElementById('sync-count').innerText = n; document.getElementById('sync-btn').classList.toggle('hidden', n === 0); };
+        }
+        window.triggerSync = async () => {
+             if(!navigator.onLine) return alert("Still offline.");
+             setLoading(true, "Syncing...");
+             const tx = dbOffline.transaction(DB_STORE, 'readonly');
+             const req = tx.objectStore(DB_STORE).getAll();
+             req.onsuccess = async () => {
+                 const items = req.result;
+                 let successCount = 0;
+                 for (const item of items) {
+                     try {
+                         // Re-upload logic
+                         if(item.type === 'photo') {
+                             await uploadBytes(ref(storage, item.rawStoragePath), item.blob, { contentType: 'image/jpeg' });
+                             const snap = await uploadBytes(ref(storage, item.storagePath), item.finalBlob, { contentType: 'image/jpeg' });
+                             const url = await getDownloadURL(snap.ref);
+                             await setDoc(doc(db, `artifacts/${appId}/public/data/images`, item.id), { ...item.firestoreData, url: url });
+                         }
+                         const delTx = dbOffline.transaction(DB_STORE, 'readwrite');
+                         delTx.objectStore(DB_STORE).delete(item.id);
+                         successCount++;
+                     } catch(e) { console.error("Sync fail", e); }
+                 }
+                 setLoading(false); updateSyncCount();
+                 if(successCount > 0) showToast(`Synced ${successCount} items`);
+             };
+        };
+
+        window.deleteRawFile = async (fullPath) => {
+            if(!confirm("Permanently delete?")) return;
+            setLoading(true);
+            try { await deleteObject(ref(storage, fullPath)); showToast("Deleted"); loadBrowser(browserPath); }
+            catch(e) { alert("Error: " + e.message); }
+            setLoading(false);
+        };
+        
+        // --- SENSORS & INIT ---
+        window.requestCompassPermission = async () => {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const perm = await DeviceOrientationEvent.requestPermission();
+                    if (perm === 'granted') {
+                        window.addEventListener('deviceorientation', handleOrientation);
+                        document.getElementById('compass-status').innerText = "Active";
+                    } else alert("Permission denied");
+                } catch(e) { alert(e); }
+            } else {
+                alert("Not required/supported.");
+                window.addEventListener('deviceorientationabsolute', handleOrientation);
+                window.addEventListener('deviceorientation', handleOrientation);
+            }
+        };
+        function handleOrientation(e) {
+            let heading = e.webkitCompassHeading || (e.alpha !== null ? 360 - e.alpha : null);
+            if(heading !== null) {
+                currentHeading = heading;
+                const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+                const ix = Math.round(heading / 45) % 8;
+                const el = document.getElementById('compass-status');
+                if(el) { el.innerText = `${Math.round(heading)}° ${dirs[ix]}`; el.classList.replace('text-gray-400', 'text-blue-600'); }
             }
         }
+        async function fetchWeather(lat, lng) {
+            try {
+                const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&temperature_unit=fahrenheit`);
+                const data = await r.json();
+                if(data.current_weather) {
+                    const code = data.current_weather.weathercode;
+                    let desc = code === 0 ? "Clear Sky" : code < 4 ? "Partly Cloudy" : code < 50 ? "Foggy" : code < 80 ? "Rain" : "Storm/Snow";
+                    currentWeather = { temp: `${data.current_weather.temperature}°F`, desc: desc };
+                    const wxEl = document.getElementById('weather-status');
+                    if(wxEl) { wxEl.innerText = `${desc}, ${currentWeather.temp}`; wxEl.classList.replace('text-gray-400', 'text-blue-600'); }
+                }
+            } catch(e) {}
+        }
 
-        // --- INIT ---
         async function init() {
             const app = initializeApp(config);
             auth = getAuth(app); db = getFirestore(app); storage = getStorage(app);
+            initDB();
 
             onAuthStateChanged(auth, (u) => {
                 user = u;
                 updateStatus(u ? 'online' : 'offline');
-                if(u) {
-                    loadReport();
-                    browserPath = `artifacts/${appId}/public/data/files`;
-                    loadBrowser(browserPath);
-                }
+                if(u) { loadReport(); loadBrowser(browserPath); }
             });
 
             const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-            if (token) { try { await signInWithCustomToken(auth, token); } catch { await signInAnonymously(auth); } }
-            else { await signInAnonymously(auth); }
-
-            document.getElementById('camera-input').onchange = window.handleCameraInput; // FIXED REFERENCE
-            document.getElementById('report-search').oninput = (e) => filterReport(e.target.value);
             
-            // Watch GPS & Weather
-            if (navigator.geolocation) {
-                navigator.geolocation.watchPosition(
-                    (p) => {
-                        currentLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
-                        // Update UI to Green
-                        const el = document.getElementById('gps-status');
-                        if (el) {
-                            el.innerText = `${p.coords.latitude.toFixed(4)}, ${p.coords.longitude.toFixed(4)}`;
-                            el.classList.remove('text-orange-500', 'text-red-500');
-                            el.classList.add('text-green-600');
-                        }
-                        // Update weather occasionally if not set
-                        if(!currentWeather.temp) fetchWeather(p.coords.latitude, p.coords.longitude);
-                    },
-                    (err) => {
-                        // Handle Errors
-                        console.warn("GPS Error", err);
-                        const el = document.getElementById('gps-status');
-                        if (el) {
-                            let msg = "No Signal";
-                            if (err.code === 1) msg = "Permission Denied";
-                            if (err.code === 2) msg = "Pos Unavailable";
-                            if (err.code === 3) msg = "Timeout";
-                            el.innerText = msg;
-                            el.classList.remove('text-orange-500', 'text-green-600');
-                            el.classList.add('text-red-500');
-                        }
-                    },
-                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-                );
-            } else {
-                const el = document.getElementById('gps-status');
-                if(el) {
-                    el.innerText = "Not Supported";
-                    el.classList.add('text-red-500');
+            // Enhanced Login Logic with Diagnostics
+            try {
+                if (token) {
+                     await signInWithCustomToken(auth, token); 
+                } else {
+                     await signInAnonymously(auth); 
                 }
+            } catch (e) {
+                console.error("Authentication Failed:", e);
+                alert("CRITICAL ERROR: Authentication Failed.\n\n" + e.message + "\n\nThis app will not be able to upload data until this is fixed in the Firebase Console.");
             }
+
+            document.getElementById('camera-input').onchange = window.handleCameraInput;
+            document.getElementById('upload-input').onchange = window.handleCameraInput;
+            document.getElementById('report-search').oninput = (e) => {
+                 const txt = e.target.value.toLowerCase();
+                 document.querySelectorAll('#report-feed > div').forEach(c => c.style.display = c.innerText.toLowerCase().includes(txt) ? 'flex' : 'none');
+            };
             
-            // Try to initialize compass if permission is already granted (or not needed)
+            window.addEventListener('online', () => { updateStatus('online'); triggerSync(); });
+            window.addEventListener('offline', () => updateStatus('offline'));
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition((p) => {
+                    currentLocation = { lat: p.coords.latitude, lng: p.coords.longitude };
+                    const el = document.getElementById('gps-status');
+                    if (el) { el.innerText = `${p.coords.latitude.toFixed(4)}, ${p.coords.longitude.toFixed(4)}`; el.classList.remove('text-orange-500', 'text-red-500'); el.classList.add('text-green-600'); }
+                    if(!currentWeather.temp) fetchWeather(p.coords.latitude, p.coords.longitude);
+                }, (err) => {
+                    const el = document.getElementById('gps-status');
+                    if (el) { el.innerText = "No Signal"; el.classList.add('text-red-500'); }
+                }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+            }
+
+            // Auto-compass attempt
             if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission !== 'function') {
                  window.addEventListener('deviceorientationabsolute', handleOrientation);
                  window.addEventListener('deviceorientation', handleOrientation);
-                 document.getElementById('compass-status').innerText = "Active";
             }
 
             updateProjectHeader(); renderProjectOptions();
-            syncProjectList(); // SYNC PROJECTS ON LOAD
             setTimeout(() => window.setReportFilter(currentReportFilter), 100);
         }
 
