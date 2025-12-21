@@ -145,6 +145,14 @@
         <!-- TAB 2: REPORT -->
         <div id="tab-report" class="tab-content h-full bg-white">
             <div class="flex flex-col h-full">
+                <!-- Header with Report Button -->
+                <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 flex-none">
+                    <h2 class="font-bold text-slate-800">Project Log</h2>
+                    <button onclick="window.app.genPDF()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow flex items-center gap-1 active:scale-95 transition">
+                        <i data-lucide="file-text" class="w-3 h-3"></i> Generate Report
+                    </button>
+                </div>
+
                 <!-- Toolbar -->
                 <div class="p-3 border-b border-slate-200 flex gap-2 overflow-x-auto no-scrollbar bg-white sticky top-0 z-10 flex-none">
                     <div class="flex-1 relative">
@@ -329,6 +337,13 @@
         <div class="bg-white rounded-2xl w-full max-w-xs p-6 shadow-2xl">
             <h3 class="text-lg font-bold text-slate-800 mb-4">Project Settings</h3>
             
+            <div class="flex items-center justify-between mb-4">
+                <span class="text-xs font-bold text-slate-500 uppercase">Connection</span>
+                <button id="offline-toggle-btn" onclick="window.app.toggleForceOffline()" class="text-xs font-bold px-3 py-1 rounded bg-green-100 text-green-700 border border-green-200 transition">
+                    Online
+                </button>
+            </div>
+            
             <label class="text-xs font-bold text-slate-500 uppercase mb-1 block">Active Project</label>
             <select id="project-select" onchange="window.app.switchProject(this.value)" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm mb-1 bg-white"></select>
             
@@ -406,7 +421,8 @@
             items: [], seriesMode: false, queue: [],
             pendingBlob: null, pendingId: null, editMode: false,
             tempMeta: null, // Holds EXIF data temporarily
-            online: navigator.onLine // Connection state
+            online: navigator.onLine, // Connection state
+            forcedOffline: false // User override
         };
 
         // UTILS
@@ -505,15 +521,37 @@
                 lucide.createIcons();
                 
                 // Connection Listeners
-                window.addEventListener('online', () => this.updateConnectionStatus(true));
-                window.addEventListener('offline', () => this.updateConnectionStatus(false));
-                this.updateConnectionStatus(navigator.onLine);
+                window.addEventListener('online', () => this.updateConnectionStatus());
+                window.addEventListener('offline', () => this.updateConnectionStatus());
+                this.updateConnectionStatus(); // Initial check
+            }
+            
+            toggleForceOffline() {
+                state.forcedOffline = !state.forcedOffline;
+                this.updateConnectionStatus();
+                
+                // Update Button Visual
+                const btn = $('offline-toggle-btn');
+                if(state.forcedOffline) {
+                    btn.innerText = "Offline (Forced)";
+                    btn.className = "text-xs font-bold px-3 py-1 rounded bg-orange-100 text-orange-700 border border-orange-200 transition";
+                } else {
+                    btn.innerText = "Online";
+                    btn.className = "text-xs font-bold px-3 py-1 rounded bg-green-100 text-green-700 border border-green-200 transition";
+                }
+                
+                showToast(state.forcedOffline ? "Offline Mode Enabled" : "Back Online");
             }
 
-            updateConnectionStatus(isOnline) {
-                state.online = isOnline;
-                $('status-indicator').className = `w-3 h-3 rounded-full ring-2 ring-white shadow-sm transition-colors duration-300 ${isOnline ? 'bg-green-500' : 'bg-orange-500'}`;
-                if(isOnline) this.syncOutbox();
+            updateConnectionStatus() {
+                // Effective status logic
+                const networkOnline = navigator.onLine;
+                const effectiveOnline = networkOnline && !state.forcedOffline;
+                state.online = effectiveOnline;
+
+                $('status-indicator').className = `w-3 h-3 rounded-full ring-2 ring-white shadow-sm transition-colors duration-300 ${effectiveOnline ? 'bg-green-500' : 'bg-orange-500'}`;
+                
+                if(effectiveOnline) this.syncOutbox();
             }
 
             async syncOutbox() {
@@ -1578,32 +1616,101 @@
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF();
                 let y = 20;
+                const pageWidth = doc.internal.pageSize.getWidth();
                 
-                doc.setFontSize(18); doc.text(`Field Report: ${state.project}`, 105, y, {align:'center'}); y+=15;
+                // Title Page
+                doc.setFontSize(22); 
+                doc.text("Field Inspection Report", pageWidth/2, 40, {align:'center'});
                 
+                doc.setFontSize(14); 
+                doc.text(`Project: ${state.project}`, pageWidth/2, 55, {align:'center'});
+                doc.text(`Generated: ${new Date().toLocaleString()}`, pageWidth/2, 65, {align:'center'});
+                
+                // Footer helper
+                const addFooter = (pageNum) => {
+                    doc.setFontSize(8);
+                    doc.text(`Page ${pageNum}`, pageWidth - 20, doc.internal.pageSize.getHeight() - 10);
+                };
+
+                let pageNum = 1;
+                addFooter(pageNum);
+
+                // 1. Photos & Sketches
                 const photos = state.items.filter(i => i.type === 'photo');
-                for(let i=0; i<photos.length; i++) {
-                    const p = photos[i];
-                    if(y > 250) { doc.addPage(); y=20; }
-                    try {
-                        const imgData = await this.urlToBase64(p.url);
-                        doc.addImage(imgData, 'JPEG', 20, y, 170, 100);
-                        y+=105;
-                        doc.setFontSize(10); doc.text(`Photo #${p.photoNumber}: ${p.caption}`, 20, y);
-                        y+=15;
-                    } catch(e) {}
+                if(photos.length > 0) {
+                    doc.addPage(); pageNum++; addFooter(pageNum); y = 20;
+                    doc.setFontSize(16); doc.text("Photo Log", 15, y); y += 15;
+                    
+                    for(let i=0; i<photos.length; i++) {
+                        const p = photos[i];
+                        // Check space: Image (100) + Text (20) + Margin (10) = ~130
+                        if(y + 130 > doc.internal.pageSize.getHeight()) { 
+                            doc.addPage(); pageNum++; addFooter(pageNum); y = 20; 
+                        }
+                        
+                        try {
+                            const imgData = await this.urlToBase64(p.url);
+                            doc.addImage(imgData, 'JPEG', 20, y, 170, 100); // W=170, H=100 (aspect ratio might vary, but fixed for report)
+                            
+                            // Draw border
+                            doc.setDrawColor(200); doc.rect(20, y, 170, 100);
+                            
+                            y += 105;
+                            doc.setFontSize(10); 
+                            doc.setFont("helvetica", "bold");
+                            doc.text(`Photo #${p.photoNumber || (i+1)}`, 20, y);
+                            
+                            doc.setFont("helvetica", "normal");
+                            const dateStr = p.dateString || new Date(p.timestamp).toLocaleString();
+                            doc.text(dateStr, 190, y, {align:'right'});
+                            
+                            y += 5;
+                            doc.setFontSize(9);
+                            const caption = p.caption || p.detailedDesc || "No caption";
+                            const splitText = doc.splitTextToSize(caption, 170);
+                            doc.text(splitText, 20, y);
+                            
+                            y += (splitText.length * 5) + 10;
+                        } catch(e) {
+                            console.error("PDF Image Error", e);
+                        }
+                    }
                 }
-                
-                // Notes section
+
+                // 2. Field Notes
                 const notes = state.items.filter(i => i.type === 'note');
-                if(notes.length) {
-                    doc.addPage(); y=20;
-                    doc.setFontSize(14); doc.text("Notes Log", 20, y); y+=10;
-                    doc.setFontSize(10);
-                    notes.forEach(n => {
-                        const lines = doc.splitTextToSize(`[${n.dateString}] ${n.title ? n.title+': ' : ''}${n.text}`, 170);
-                        doc.text(lines, 20, y);
-                        y += (lines.length * 5) + 5;
+                if(notes.length > 0) {
+                    doc.addPage(); pageNum++; addFooter(pageNum); y = 20;
+                    doc.setFontSize(16); doc.text("Field Notes", 15, y); y += 15;
+                    
+                    notes.forEach((n, idx) => {
+                        if(y + 40 > doc.internal.pageSize.getHeight()) { 
+                            doc.addPage(); pageNum++; addFooter(pageNum); y = 20; 
+                        }
+                        
+                        doc.setDrawColor(220); doc.setFillColor(248, 250, 252);
+                        doc.roundedRect(15, y, 180, 0, 2, 2); // Background placeholder
+                        
+                        const startY = y;
+                        y += 5;
+                        
+                        doc.setFontSize(11); doc.setFont("helvetica", "bold");
+                        doc.text(n.title || "Note", 20, y);
+                        
+                        doc.setFontSize(9); doc.setFont("helvetica", "normal");
+                        doc.text(n.dateString, 185, y, {align:'right'});
+                        
+                        y += 7;
+                        const desc = n.text || n.detailedDesc || "";
+                        const splitDesc = doc.splitTextToSize(desc, 170);
+                        doc.text(splitDesc, 20, y);
+                        
+                        y += (splitDesc.length * 5) + 10;
+                        
+                        // Draw box around the item
+                        const height = y - startY - 5;
+                        doc.rect(15, startY, 180, height);
+                        y += 5;
                     });
                 }
                 
