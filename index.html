@@ -21,7 +21,8 @@
 
     <style>
         body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; background-color: #f1f5f9; }
-        .tab-content { display: none; height: calc(100vh - 130px); overflow-y: auto; }
+        /* CHANGED: Height is 100% of parent (main), not calc based */
+        .tab-content { display: none; height: 100%; overflow-y: auto; }
         .tab-content.active { display: block; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -36,7 +37,8 @@
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
     </style>
 </head>
-<body class="text-slate-800 h-screen flex flex-col overflow-hidden">
+<!-- CHANGED: h-screen to h-[100dvh] for mobile browser bar support -->
+<body class="text-slate-800 h-[100dvh] flex flex-col overflow-hidden">
 
     <!-- HEADER -->
     <header class="bg-white shadow-sm z-30 px-4 py-3 flex justify-between items-center border-b border-slate-200 flex-none">
@@ -101,17 +103,24 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4 mb-4">
-                    <!-- Live Camera -->
-                    <label class="cursor-pointer group relative flex flex-col items-center justify-center bg-blue-50 hover:bg-blue-100 rounded-xl p-4 border-2 border-dashed border-blue-200 transition active:scale-95 h-28">
-                        <div class="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center shadow-lg text-white mb-2 group-hover:scale-110 transition-transform">
-                            <i data-lucide="camera" class="w-5 h-5"></i>
-                        </div>
-                        <span class="text-xs font-bold text-blue-900">Live Photo</span>
-                        <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
-                    </label>
+                <div class="grid grid-cols-2 gap-3">
+                    
+                    <!-- 1. Live Photo Container -->
+                    <div class="flex flex-col gap-2">
+                        <label class="cursor-pointer group relative flex flex-col items-center justify-center bg-blue-50 hover:bg-blue-100 rounded-xl p-4 border-2 border-dashed border-blue-200 transition active:scale-95 h-28">
+                            <div class="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center shadow-lg text-white mb-2 group-hover:scale-110 transition-transform">
+                                <i data-lucide="camera" class="w-5 h-5"></i>
+                            </div>
+                            <span class="text-xs font-bold text-blue-900">Live Photo</span>
+                            <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
+                        </label>
+                        <!-- Series Mode Button Under Live Photo -->
+                        <button id="series-btn" onclick="window.app.toggleSeriesMode()" class="w-full py-1.5 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 transition bg-white text-slate-500 border-slate-200 hover:bg-slate-50">
+                            <i data-lucide="layers" class="w-3 h-3"></i> <span id="series-text">Series Mode</span>
+                        </button>
+                    </div>
 
-                    <!-- Gallery Upload -->
+                    <!-- 2. Gallery Upload -->
                     <label class="cursor-pointer group relative flex flex-col items-center justify-center bg-indigo-50 hover:bg-indigo-100 rounded-xl p-4 border-2 border-dashed border-indigo-200 transition active:scale-95 h-28">
                         <div class="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center shadow-lg text-white mb-2 group-hover:scale-110 transition-transform">
                             <i data-lucide="image" class="w-5 h-5"></i>
@@ -119,31 +128,23 @@
                         <span class="text-xs font-bold text-indigo-900">Gallery</span>
                         <input type="file" id="gallery-input" accept="image/*" class="hidden">
                     </label>
-                </div>
 
-                <!-- Secondary Actions -->
-                <div class="grid grid-cols-2 gap-4">
-                    <!-- Sketch -->
-                    <button onclick="window.app.openSketch()" class="w-full py-2.5 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 transition bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100">
-                        <i data-lucide="pen-tool" class="w-4 h-4"></i> Sketch
+                    <!-- 3. Sketch -->
+                    <button onclick="window.app.openSketch()" class="cursor-pointer group relative flex flex-col items-center justify-center bg-purple-50 hover:bg-purple-100 rounded-xl p-4 border-2 border-dashed border-purple-200 transition active:scale-95 h-28">
+                        <div class="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center shadow-lg text-white mb-2 group-hover:scale-110 transition-transform">
+                            <i data-lucide="pen-tool" class="w-5 h-5"></i>
+                        </div>
+                        <span class="text-xs font-bold text-purple-900">Sketch</span>
                     </button>
-                    <!-- Series Mode -->
-                    <button id="series-btn" onclick="window.app.toggleSeriesMode()" class="w-full py-2.5 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 transition bg-white text-slate-600 border-slate-200 hover:bg-slate-50">
-                        <i data-lucide="layers" class="w-4 h-4"></i> <span id="series-text">Series Mode</span>
-                    </button>
-                </div>
-            </div>
 
-            <!-- Quick Note -->
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                <div class="bg-slate-50 px-4 py-2 border-b border-slate-200 flex justify-between items-center">
-                    <span class="text-xs font-bold text-slate-700 uppercase">Field Observation</span>
-                    <i data-lucide="file-text" class="w-4 h-4 text-slate-400"></i>
-                </div>
-                <div class="p-4 space-y-3">
-                    <input type="text" id="note-title" placeholder="Location / Title (Optional)" class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none">
-                    <textarea id="note-text" placeholder="Enter observation details..." class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 h-20 resize-none focus:ring-2 focus:ring-blue-500 outline-none"></textarea>
-                    <button onclick="window.app.saveNote()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-lg text-sm transition shadow">Save Note</button>
+                    <!-- 4. Notes (Triggers Modal) -->
+                    <button onclick="window.app.openNotes()" class="cursor-pointer group relative flex flex-col items-center justify-center bg-emerald-50 hover:bg-emerald-100 rounded-xl p-4 border-2 border-dashed border-emerald-200 transition active:scale-95 h-28">
+                        <div class="w-10 h-10 bg-emerald-600 rounded-full flex items-center justify-center shadow-lg text-white mb-2 group-hover:scale-110 transition-transform">
+                            <i data-lucide="file-text" class="w-5 h-5"></i>
+                        </div>
+                        <span class="text-xs font-bold text-emerald-900">Notes</span>
+                    </button>
+
                 </div>
             </div>
         </div>
@@ -226,6 +227,32 @@
             <span class="text-[10px] font-bold">Files</span>
         </button>
     </nav>
+
+    <!-- MODAL: NOTES (NEW) -->
+    <div id="modal-notes" class="fixed inset-0 z-50 bg-black/90 hidden flex flex-col justify-end sm:justify-center p-0 sm:p-4 fade-in">
+        <div class="bg-white w-full max-w-md mx-auto rounded-t-2xl sm:rounded-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                <div class="flex items-center gap-2 text-slate-700 font-bold">
+                    <i data-lucide="file-text" class="w-5 h-5 text-emerald-600"></i> Field Observation
+                </div>
+                <button onclick="window.app.closeNotes()" class="p-1 rounded hover:bg-slate-200 text-slate-500"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="p-5 flex-1 overflow-y-auto space-y-4">
+                <div>
+                    <label class="text-[10px] font-bold text-slate-500 uppercase">Title / Location</label>
+                    <input type="text" id="note-title" placeholder="e.g. North Abutment" class="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-500 outline-none mt-1">
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-slate-500 uppercase">Description</label>
+                    <textarea id="note-text" placeholder="Enter observation details..." class="w-full border border-slate-300 rounded-lg p-3 text-sm h-32 resize-none focus:ring-2 focus:ring-emerald-500 outline-none mt-1"></textarea>
+                </div>
+            </div>
+            <div class="p-4 border-t border-slate-200 bg-slate-50 flex gap-3 flex-none pb-safe">
+                <button onclick="window.app.closeNotes()" class="flex-1 py-3 bg-white border border-slate-300 text-slate-700 font-bold rounded-xl text-sm hover:bg-slate-50">Cancel</button>
+                <button onclick="window.app.saveNote()" class="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl text-sm shadow hover:bg-emerald-700">Save Note</button>
+            </div>
+        </div>
+    </div>
 
     <!-- MODAL: CAPTION / EDIT -->
     <div id="modal-caption" class="fixed inset-0 z-50 bg-black/90 hidden flex flex-col justify-end sm:justify-center p-0 sm:p-4 fade-in">
@@ -409,6 +436,7 @@
                 this.map = null;
                 this.markers = null;
                 this.wbCtx = null;
+                this.bgImage = null; // Store background image for clearing sketch
                 this.initFirebase();
                 this.initSensors();
                 this.bindEvents();
@@ -651,40 +679,48 @@
             
             extractExif(file) {
                 return new Promise((resolve) => {
-                    EXIF.getData(file, function() {
-                        const allTags = EXIF.getAllTags(this);
-                        
-                        // Parse Date
-                        let timestamp = Date.now();
-                        if (allTags.DateTimeOriginal) {
-                            // Format: "2023:10:25 14:30:00" -> "2023/10/25 14:30:00"
-                            const str = allTags.DateTimeOriginal.split(' ');
-                            const dateParts = str[0].split(':');
-                            const timeParts = str[1].split(':');
-                            const date = new Date(dateParts[0], dateParts[1]-1, dateParts[2], timeParts[0], timeParts[1], timeParts[2]);
-                            timestamp = date.getTime();
-                        } else if (file.lastModified) {
-                             timestamp = file.lastModified;
-                        }
-
-                        // Parse GPS
-                        let lat = null, lng = null;
-                        if (allTags.GPSLatitude && allTags.GPSLongitude) {
-                            // Helper to convert array [deg, min, sec] to decimal
-                            const toDecimal = (gps, ref) => {
-                                let d = gps[0].numerator / gps[0].denominator;
-                                let m = gps[1].numerator / gps[1].denominator;
-                                let s = gps[2].numerator / gps[2].denominator;
-                                let res = d + (m/60) + (s/3600);
-                                if (ref === 'S' || ref === 'W') res = res * -1;
-                                return res;
-                            };
-                            lat = toDecimal(allTags.GPSLatitude, allTags.GPSLatitudeRef);
-                            lng = toDecimal(allTags.GPSLongitude, allTags.GPSLongitudeRef);
-                        }
-                        
-                        resolve({ timestamp, lat, lng });
-                    });
+                    try {
+                        EXIF.getData(file, function() {
+                            const allTags = EXIF.getAllTags(this);
+                            
+                            // Parse Date
+                            let timestamp = Date.now();
+                            if (allTags.DateTimeOriginal) {
+                                try {
+                                    // Format: "2023:10:25 14:30:00" -> "2023/10/25 14:30:00"
+                                    const str = allTags.DateTimeOriginal.split(' ');
+                                    const dateParts = str[0].split(':');
+                                    const timeParts = str[1].split(':');
+                                    const date = new Date(dateParts[0], dateParts[1]-1, dateParts[2], timeParts[0], timeParts[1], timeParts[2]);
+                                    if(!isNaN(date.getTime())) timestamp = date.getTime();
+                                } catch(e) { console.warn("Date parse error", e); }
+                            } else if (file.lastModified) {
+                                 timestamp = file.lastModified;
+                            }
+    
+                            // Parse GPS
+                            let lat = null, lng = null;
+                            if (allTags.GPSLatitude && allTags.GPSLongitude) {
+                                // Helper to convert array [deg, min, sec] to decimal
+                                const toDecimal = (gps, ref) => {
+                                    if(!gps || gps.length < 3) return 0;
+                                    let d = gps[0].numerator / gps[0].denominator;
+                                    let m = gps[1].numerator / gps[1].denominator;
+                                    let s = gps[2].numerator / gps[2].denominator;
+                                    let res = d + (m/60) + (s/3600);
+                                    if (ref === 'S' || ref === 'W') res = res * -1;
+                                    return res;
+                                };
+                                lat = toDecimal(allTags.GPSLatitude, allTags.GPSLatitudeRef);
+                                lng = toDecimal(allTags.GPSLongitude, allTags.GPSLongitudeRef);
+                            }
+                            
+                            resolve({ timestamp, lat, lng });
+                        });
+                    } catch(e) {
+                        console.error("EXIF Error", e);
+                        resolve({ timestamp: Date.now(), lat: null, lng: null });
+                    }
                 });
             }
 
@@ -695,23 +731,23 @@
                 
                 if(state.seriesMode) {
                     state.queue = []; // Clear old queue
-                    btn.classList.remove('bg-white', 'text-slate-600', 'border-slate-200');
+                    btn.classList.remove('bg-white', 'text-slate-500', 'border-slate-200', 'hover:bg-slate-50');
                     btn.classList.add('bg-orange-50', 'text-orange-700', 'border-orange-300', 'animate-pulse');
-                    txt.innerText = "Rapid Mode Active (0)";
+                    txt.innerText = "Active (0)";
                 } else {
                     if(state.queue.length > 0) {
                         // Process queue if stopping
                         this.processQueue();
                     }
-                    btn.classList.add('bg-white', 'text-slate-600', 'border-slate-200');
+                    btn.classList.add('bg-white', 'text-slate-500', 'border-slate-200', 'hover:bg-slate-50');
                     btn.classList.remove('bg-orange-50', 'text-orange-700', 'border-orange-300', 'animate-pulse');
-                    txt.innerText = "Enable Rapid Series";
+                    txt.innerText = "Series Mode";
                 }
             }
 
             addToQueue(blob, id) {
                 state.queue.push({ blob, id, timestamp: Date.now() });
-                $('series-text').innerText = `Rapid Mode Active (${state.queue.length})`;
+                $('series-text').innerText = `Active (${state.queue.length})`;
                 showToast(`Photo ${state.queue.length} Queued`);
             }
 
@@ -744,7 +780,21 @@
 
             // --- CAPTION MODAL & EDITING ---
             openCaptionModal(blobOrUrl, isEdit = false, isGallery = false) {
-                const url = typeof blobOrUrl === 'string' ? blobOrUrl : URL.createObjectURL(blobOrUrl);
+                let url;
+                try {
+                    if (typeof blobOrUrl === 'string') {
+                        url = blobOrUrl;
+                    } else if (blobOrUrl instanceof Blob) {
+                        url = URL.createObjectURL(blobOrUrl);
+                    } else {
+                        throw new Error("Invalid image source");
+                    }
+                } catch(e) {
+                    console.error("Preview Error:", e);
+                    showToast("Error loading image preview");
+                    return;
+                }
+
                 $('modal-img-preview').src = url;
                 $('cap-title').value = isEdit ? (state.currentItem.title || '') : '';
                 $('cap-desc').value = isEdit ? (state.currentItem.detailedDesc || '') : '';
@@ -924,7 +974,12 @@
 
                         c.toBlob(resolve, 'image/jpeg', 0.85);
                     };
-                    img.src = URL.createObjectURL(blob);
+                    // Robust createObjectURL
+                    try {
+                        img.src = URL.createObjectURL(blob);
+                    } catch(e) {
+                        resolve(blob); // Fallback to original if overload fails (should not happen with Blob)
+                    }
                 });
             }
 
@@ -938,6 +993,8 @@
                 const ctx = canvas.getContext('2d');
                 ctx.fillStyle = "#fff"; ctx.fillRect(0,0,canvas.width, canvas.height);
                 ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                
+                this.bgImage = null; // Clear any previous background image
                 this.wbCtx = ctx;
                 this.isDrawing = false;
 
@@ -954,16 +1011,33 @@
             }
 
             closeSketch() { $('modal-sketch').classList.add('hidden'); }
+            
             clearSketch() { 
-                const c=$('sketch-canvas'); 
-                this.wbCtx.fillStyle="#fff"; 
-                this.wbCtx.fillRect(0,0,c.width,c.height); 
+                const c = $('sketch-canvas'); 
+                const ctx = this.wbCtx;
+                
+                // 1. Clear to white
+                ctx.fillStyle = "#fff"; 
+                ctx.fillRect(0, 0, c.width, c.height); 
+                
+                // 2. If we have a background image (annotating), redraw it
+                if (this.bgImage) {
+                    const img = this.bgImage;
+                    const scale = Math.min(c.width / img.width, c.height / img.height);
+                    const x = (c.width / 2) - (img.width / 2) * scale;
+                    const y = (c.height / 2) - (img.height / 2) * scale;
+                    ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+                }
             }
             
             saveSketch() {
                 $('sketch-canvas').toBlob((blob) => {
-                    this.closeSketch();
-                    this.handleFileSelect(blob);
+                    if (blob) {
+                        this.closeSketch();
+                        this.handleFileSelect(blob);
+                    } else {
+                        showToast("Error saving sketch");
+                    }
                 }, 'image/jpeg');
             }
             
@@ -983,15 +1057,20 @@
                      ctx.fillStyle = "#fff"; ctx.fillRect(0,0,canvas.width, canvas.height);
                      // Draw image centered/scaled
                      const img = new Image();
+                     img.crossOrigin = "Anonymous";
                      img.onload = () => {
                          const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
                          const x = (canvas.width / 2) - (img.width / 2) * scale;
                          const y = (canvas.height / 2) - (img.height / 2) * scale;
                          ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+                         
+                         // STORE IMAGE FOR CLEAR FUNCTION
+                         this.bgImage = img;
                      };
                      img.src = imgEl.src;
                      
                      // Re-bind drawing events (same as openSketch)
+                     this.isDrawing = false;
                      canvas.onpointerdown = (e) => { this.isDrawing=true; ctx.beginPath(); ctx.moveTo(e.offsetX, e.offsetY); };
                      canvas.onpointermove = (e) => { 
                         if(!this.isDrawing) return; 
@@ -1005,6 +1084,16 @@
             }
 
             // --- NOTES ---
+            openNotes() {
+                $('modal-notes').classList.remove('hidden');
+            }
+
+            closeNotes() {
+                $('modal-notes').classList.add('hidden');
+                $('note-title').value = '';
+                $('note-text').value = '';
+            }
+
             async saveNote() {
                 const title = $('note-title').value.trim();
                 const text = $('note-text').value.trim();
@@ -1019,7 +1108,7 @@
                 };
                 
                 await setDoc(doc(state.db, `artifacts/${appId}/public/data/images`, id), meta);
-                $('note-title').value = ''; $('note-text').value = '';
+                this.closeNotes();
                 showToast("Note Saved");
                 this.switchTab('report');
             }
