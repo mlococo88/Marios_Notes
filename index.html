@@ -422,7 +422,8 @@
             pendingBlob: null, pendingId: null, editMode: false,
             tempMeta: null, // Holds EXIF data temporarily
             online: navigator.onLine, // Connection state
-            forcedOffline: false // User override
+            forcedOffline: false, // User override
+            batchMode: false // Flag for batch upload workflow
         };
 
         // UTILS
@@ -898,8 +899,8 @@
                     txt.innerText = "Active (0)";
                 } else {
                     if(state.queue.length > 0) {
-                        // Process queue if stopping
-                        this.processQueue();
+                        // NEW LOGIC: Open modal instead of processing queue immediately
+                        this.openBatchCaptionModal();
                     }
                     btn.classList.add('bg-white', 'text-slate-500', 'border-slate-200', 'hover:bg-slate-50');
                     btn.classList.remove('bg-orange-50', 'text-orange-700', 'border-orange-300', 'animate-pulse');
@@ -925,32 +926,28 @@
                 $('series-text').innerText = `Active (${state.queue.length})`;
                 showToast(`Photo ${state.queue.length} Queued`);
             }
-
-            async processQueue() {
-                if(state.queue.length === 0) return;
+            
+            // Replaced processQueue with openBatchCaptionModal logic
+            
+            openBatchCaptionModal() {
                 const count = state.queue.length;
-                if(!confirm(`Upload ${count} photos in series?`)) {
-                    state.queue = [];
-                    return;
-                }
+                if (count === 0) return;
                 
-                toggleLoader(true, `Uploading ${count} photos...`);
-                // Batch upload with simple caption
+                const firstItem = state.queue[0];
+                let url;
                 try {
-                    const promises = state.queue.map((item, idx) => {
-                         const meta = this.createMeta(item.id, item.timestamp, `Series ${idx+1}/${count}`);
-                         return this.uploadWorkflow(item.blob, meta, true); // true = raw upload
-                    });
-                    await Promise.all(promises);
-                    showToast("Series Uploaded");
-                    this.switchTab('report');
-                } catch(e) {
-                    console.error(e);
-                    showToast("Series Error");
-                } finally {
-                    toggleLoader(false);
-                    state.queue = [];
-                }
+                    url = URL.createObjectURL(firstItem.blob);
+                } catch(e) { url = ''; }
+                
+                $('modal-img-preview').src = url; 
+                $('cap-title').value = '';
+                $('cap-desc').value = '';
+                $('modal-title-text').innerText = `Batch Upload (${count} Photos)`;
+                $('btn-save-upload').innerText = `Upload ${count} Photos`; 
+                
+                state.editMode = false;
+                state.batchMode = true; 
+                $('modal-caption').classList.remove('hidden');
             }
 
             // --- CAPTION MODAL & EDITING ---
@@ -991,16 +988,24 @@
                 $('modal-caption').classList.add('hidden');
                 state.pendingBlob = null;
                 state.tempMeta = null;
+                state.batchMode = false; // Reset
+                $('btn-save-upload').innerText = "Save"; // Reset button text
             }
 
-            createMeta(id, ts, defaultCaption = "") {
+            createMeta(id, ts, defaultCaption = "", overrideNum = null) {
                  const title = $('cap-title').value.trim();
                  const desc = $('cap-desc').value.trim();
                  const cap = (title && desc) ? `${title} - ${desc}` : (desc || title || defaultCaption || "No Caption");
                  
-                 // Get max photo number
-                 const existing = state.items.filter(i => i.type === 'photo');
-                 const maxNum = existing.reduce((max, i) => Math.max(max, i.photoNumber || 0), 0);
+                 // Get photo number
+                 let thisNum;
+                 if (overrideNum !== null) {
+                     thisNum = overrideNum;
+                 } else {
+                     const existing = state.items.filter(i => i.type === 'photo');
+                     const maxNum = existing.reduce((max, i) => Math.max(max, i.photoNumber || 0), 0);
+                     thisNum = maxNum + 1;
+                 }
 
                  // Use EXIF override if available, otherwise live sensors
                  let finalTs = ts;
@@ -1032,7 +1037,7 @@
                      lng: finalLng,
                      heading: state.heading,
                      weather: state.weather,
-                     photoNumber: maxNum + 1
+                     photoNumber: thisNum
                  };
             }
 
@@ -1042,6 +1047,51 @@
                     return;
                 }
 
+                // BATCH MODE HANDLING
+                if (state.batchMode) {
+                    const doOverlay = $('burn-toggle').checked;
+                    const count = state.queue.length;
+
+                    // Calculate starting photo number for sequential batch
+                    const existing = state.items.filter(i => i.type === 'photo');
+                    let currentMax = existing.reduce((max, i) => Math.max(max, i.photoNumber || 0), 0);
+
+                    toggleLoader(true, `Processing ${count} items...`);
+                    this.closeCaptionModal();
+
+                    try {
+                        const promises = state.queue.map((item, idx) => {
+                            currentMax++; // Increment for this item
+                            // Pass overrideNum to createMeta
+                            const meta = this.createMeta(item.id, item.timestamp, null, currentMax);
+
+                            if (!state.online) {
+                                return this.offlineMgr.addToOutbox({
+                                    id: item.id,
+                                    blob: item.blob,
+                                    meta: meta,
+                                    doOverlay: doOverlay,
+                                    type: 'photo'
+                                });
+                            } else {
+                                return this.uploadWorkflow(item.blob, meta, doOverlay);
+                            }
+                        });
+
+                        await Promise.all(promises);
+                        
+                        showToast(state.online ? "Batch Upload Complete" : "Batch Saved Offline");
+                        state.queue = [];
+                        this.switchTab('report');
+                    } catch (e) {
+                         alert("Batch Error: " + e.message);
+                    } finally {
+                        toggleLoader(false);
+                    }
+                    return;
+                }
+
+                // SINGLE UPLOAD HANDLING
                 if(!state.pendingBlob) return;
                 
                 const meta = this.createMeta(state.pendingId, Date.now());
