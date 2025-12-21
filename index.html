@@ -48,7 +48,10 @@
             </div>
         </div>
         <div class="flex items-center gap-3">
-            <div id="status-indicator" class="w-2.5 h-2.5 rounded-full bg-slate-300 ring-2 ring-white shadow-sm transition-colors duration-300"></div>
+            <div id="outbox-badge" class="hidden flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 rounded-full text-[10px] font-bold animate-pulse cursor-pointer" onclick="window.app.syncOutbox()">
+                <i data-lucide="upload-cloud" class="w-3 h-3"></i> <span id="outbox-count">0</span>
+            </div>
+            <div id="status-indicator" class="w-3 h-3 rounded-full bg-slate-300 ring-2 ring-white shadow-sm transition-colors duration-300"></div>
             <button onclick="window.app.toggleSettings()" class="p-2 text-slate-400 hover:text-blue-600 transition bg-slate-50 rounded-full">
                 <i data-lucide="settings" class="w-5 h-5"></i>
             </button>
@@ -402,7 +405,8 @@
             filter: 'all', path: `artifacts/${appId}/public/data/files`,
             items: [], seriesMode: false, queue: [],
             pendingBlob: null, pendingId: null, editMode: false,
-            tempMeta: null // Holds EXIF data temporarily
+            tempMeta: null, // Holds EXIF data temporarily
+            online: navigator.onLine // Connection state
         };
 
         // UTILS
@@ -417,6 +421,76 @@
         };
         const formatDate = (ts) => new Date(ts).toLocaleDateString() + ' ' + new Date(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 
+        // INDEXED DB HELPER FOR OFFLINE STORAGE
+        class OfflineManager {
+            constructor() {
+                this.dbName = 'FieldNotesDB';
+                this.storeName = 'pending_uploads';
+                this.db = null;
+                this.initDB();
+            }
+
+            initDB() {
+                const req = indexedDB.open(this.dbName, 1);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if(!db.objectStoreNames.contains(this.storeName)) {
+                        db.createObjectStore(this.storeName, { keyPath: 'id' });
+                    }
+                };
+                req.onsuccess = (e) => {
+                    this.db = e.target.result;
+                    this.updateOutboxCount();
+                };
+            }
+
+            async addToOutbox(item) {
+                return new Promise((resolve, reject) => {
+                    const tx = this.db.transaction([this.storeName], 'readwrite');
+                    const store = tx.objectStore(this.storeName);
+                    store.put(item);
+                    tx.oncomplete = () => {
+                        this.updateOutboxCount();
+                        resolve();
+                    };
+                    tx.onerror = (e) => reject(e);
+                });
+            }
+
+            async getOutbox() {
+                return new Promise((resolve) => {
+                    if(!this.db) return resolve([]);
+                    const tx = this.db.transaction([this.storeName], 'readonly');
+                    const store = tx.objectStore(this.storeName);
+                    const req = store.getAll();
+                    req.onsuccess = () => resolve(req.result);
+                });
+            }
+
+            async removeFromOutbox(id) {
+                return new Promise((resolve) => {
+                    const tx = this.db.transaction([this.storeName], 'readwrite');
+                    const store = tx.objectStore(this.storeName);
+                    store.delete(id);
+                    tx.oncomplete = () => {
+                        this.updateOutboxCount();
+                        resolve();
+                    };
+                });
+            }
+
+            async updateOutboxCount() {
+                const items = await this.getOutbox();
+                const badge = $('outbox-badge');
+                if(items.length > 0) {
+                    badge.classList.remove('hidden');
+                    $('outbox-count').innerText = items.length;
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+        }
+
         // --- CORE APPLICATION ---
         class FieldApp {
             constructor() {
@@ -424,10 +498,50 @@
                 this.markers = null;
                 this.wbCtx = null;
                 this.bgImage = null; // Store background image for clearing sketch
+                this.offlineMgr = new OfflineManager();
                 this.initFirebase();
                 this.initSensors();
                 this.bindEvents();
                 lucide.createIcons();
+                
+                // Connection Listeners
+                window.addEventListener('online', () => this.updateConnectionStatus(true));
+                window.addEventListener('offline', () => this.updateConnectionStatus(false));
+                this.updateConnectionStatus(navigator.onLine);
+            }
+
+            updateConnectionStatus(isOnline) {
+                state.online = isOnline;
+                $('status-indicator').className = `w-3 h-3 rounded-full ring-2 ring-white shadow-sm transition-colors duration-300 ${isOnline ? 'bg-green-500' : 'bg-orange-500'}`;
+                if(isOnline) this.syncOutbox();
+            }
+
+            async syncOutbox() {
+                if(!state.online) return showToast("Still Offline");
+                const items = await this.offlineMgr.getOutbox();
+                if(items.length === 0) return;
+
+                toggleLoader(true, `Syncing ${items.length} items...`);
+                let successCount = 0;
+
+                for(const item of items) {
+                    try {
+                        // Restore blob from DB (it's stored as is)
+                        // If it's a note (no blob), skip upload logic
+                        if(item.type === 'note') {
+                            await setDoc(doc(state.db, `artifacts/${appId}/public/data/images`, item.id), item.meta);
+                        } else {
+                            await this.uploadWorkflow(item.blob, item.meta, item.doOverlay);
+                        }
+                        await this.offlineMgr.removeFromOutbox(item.id);
+                        successCount++;
+                    } catch(e) {
+                        console.error("Sync failed for item", item.id, e);
+                    }
+                }
+                
+                toggleLoader(false);
+                if(successCount > 0) showToast(`Synced ${successCount} items`);
             }
 
             async initFirebase() {
@@ -438,7 +552,7 @@
 
                 onAuthStateChanged(state.auth, (user) => {
                     state.user = user;
-                    $('status-indicator').className = `w-2.5 h-2.5 rounded-full ring-2 ring-white shadow-sm transition-colors duration-300 ${user ? 'bg-green-500' : 'bg-red-500'}`;
+                    // Status logic moved to updateConnectionStatus for better control
                     if(user) {
                         this.loadData();
                         this.refreshFiles();
@@ -643,12 +757,13 @@
                 if(!file) return;
                 
                 // HEIC Conversion Logic
-                if (file.type === "image/heic" || file.name.toLowerCase().endsWith('.heic')) {
+                // Added SAFETY CHECK for file.name before accessing it
+                if (file.type === "image/heic" || (file.name && file.name.toLowerCase().endsWith('.heic'))) {
                     toggleLoader(true, "Converting HEIC...");
                     heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 }).then(jpgBlob => {
                         toggleLoader(false);
                         // Re-assign name property to blob for consistency
-                        jpgBlob.name = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
+                        jpgBlob.name = (file.name ? file.name.replace(/\.[^/.]+$/, "") : "image") + ".jpg";
                         this.processBlob(jpgBlob, true);
                     }).catch(e => {
                         toggleLoader(false);
@@ -754,6 +869,19 @@
             }
 
             addToQueue(blob, id) {
+                // If offline, save directly to IndexedDB outbox
+                if(!state.online) {
+                    this.offlineMgr.addToOutbox({
+                        id, blob,
+                        meta: this.createMeta(id, Date.now()),
+                        doOverlay: $('burn-toggle').checked,
+                        type: 'photo'
+                    });
+                    showToast("Saved to Outbox (Offline)");
+                    return;
+                }
+
+                // If Online, use normal queue flow
                 state.queue.push({ blob, id, timestamp: Date.now() });
                 $('series-text').innerText = `Active (${state.queue.length})`;
                 showToast(`Photo ${state.queue.length} Queued`);
@@ -877,12 +1005,30 @@
 
                 if(!state.pendingBlob) return;
                 
+                const meta = this.createMeta(state.pendingId, Date.now());
+                const doOverlay = $('burn-toggle').checked;
+
+                // OFFLINE HANDLING
+                if(!state.online) {
+                    toggleLoader(true, "Saving Offline...");
+                    await this.offlineMgr.addToOutbox({
+                        id: state.pendingId,
+                        blob: state.pendingBlob,
+                        meta: meta,
+                        doOverlay: doOverlay,
+                        type: 'photo'
+                    });
+                    this.closeCaptionModal();
+                    toggleLoader(false);
+                    showToast("Saved to Outbox (Offline)");
+                    return;
+                }
+
+                // ONLINE HANDLING
                 toggleLoader(true, "Processing...");
                 this.closeCaptionModal();
 
                 try {
-                    const meta = this.createMeta(state.pendingId, Date.now());
-                    const doOverlay = $('burn-toggle').checked;
                     await this.uploadWorkflow(state.pendingBlob, meta, doOverlay);
                     showToast("Upload Complete");
                     this.switchTab('report');
@@ -894,6 +1040,12 @@
             }
 
             async uploadWorkflow(blob, meta, doOverlay) {
+                // ADDED SAFETY CHECK: Ensure blob exists
+                if (!blob) {
+                    console.error("Upload failed: No blob provided");
+                    return;
+                }
+
                 // 1. Upload Raw - Use extension from name if possible
                 let ext = 'jpg';
                 if (blob.name) {
@@ -1149,6 +1301,14 @@
                     lat: state.location?.lat, lng: state.location?.lng
                 };
                 
+                // OFFLINE NOTE
+                if(!state.online) {
+                    await this.offlineMgr.addToOutbox({ id, meta, type:'note' });
+                    this.closeNotes();
+                    showToast("Note Saved (Offline)");
+                    return;
+                }
+
                 await setDoc(doc(state.db, `artifacts/${appId}/public/data/images`, id), meta);
                 this.closeNotes();
                 showToast("Note Saved");
