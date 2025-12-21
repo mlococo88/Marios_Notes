@@ -914,73 +914,87 @@
             burnOverlay(blob, meta) {
                 return new Promise((resolve) => {
                     const img = new Image();
-                    img.onload = () => {
-                        const c = document.createElement('canvas');
-                        const w = img.naturalWidth;
-                        const h = img.naturalHeight;
-                        c.width = w; c.height = h;
-                        const ctx = c.getContext('2d');
-                        
-                        // Draw Image
-                        ctx.fillStyle = "#fff"; ctx.fillRect(0,0,w,h);
-                        ctx.drawImage(img, 0, 0);
-
-                        // Overlay Logic
-                        const fSize = Math.floor(h * 0.025);
-                        const pad = fSize * 0.6;
-                        const lh = fSize * 1.4;
-                        
-                        ctx.font = `bold ${fSize}px Inter, sans-serif`;
-                        ctx.textBaseline = "top";
-
-                        // Data Block
-                        const lines = [
-                            `PROJECT: ${meta.projectId}`,
-                            `DATE: ${meta.dateString}`,
-                            `GPS: ${meta.lat ? meta.lat.toFixed(6) : '--'}, ${meta.lng ? meta.lng.toFixed(6) : '--'}`,
-                            `HEADING: ${meta.heading ? Math.round(meta.heading)+'°' : '--'}`,
-                            `NOTES: ${meta.caption}`
-                        ];
-
-                        // Calculate box height based on wrapping note
-                        let renderLines = [];
-                        const maxW = w - (pad*2);
-                        
-                        lines.forEach((l, i) => {
-                            if(i === lines.length - 1) { // Wrap note
-                                const words = l.split(' ');
-                                let line = words[0];
-                                for(let j=1; j<words.length; j++) {
-                                    if(ctx.measureText(line + " " + words[j]).width < maxW) line += " " + words[j];
-                                    else { renderLines.push(line); line = words[j]; }
-                                }
-                                renderLines.push(line);
-                            } else {
-                                renderLines.push(l);
-                            }
-                        });
-
-                        const boxH = (renderLines.length * lh) + (pad*2);
-                        
-                        // Draw Box
-                        ctx.fillStyle = "rgba(0,0,0,0.6)";
-                        ctx.fillRect(0, h - boxH, w, boxH);
-
-                        // Draw Text
-                        ctx.fillStyle = "#ffffff";
-                        let y = h - boxH + pad;
-                        renderLines.forEach(l => {
-                            ctx.fillText(l, pad, y);
-                            y += lh;
-                        });
-
-                        c.toBlob(resolve, 'image/jpeg', 0.85);
+                    
+                    // Fallback mechanism
+                    const fallback = () => {
+                        console.warn("Image processing failed, using original.");
+                        resolve(blob); 
                     };
-                    // Robust createObjectURL
+
+                    img.onload = () => {
+                        try {
+                            const c = document.createElement('canvas');
+                            const w = img.naturalWidth;
+                            const h = img.naturalHeight;
+                            c.width = w; c.height = h;
+                            const ctx = c.getContext('2d');
+                            
+                            // Draw Image
+                            ctx.fillStyle = "#fff"; ctx.fillRect(0,0,w,h);
+                            ctx.drawImage(img, 0, 0);
+
+                            // Overlay Logic
+                            const fSize = Math.floor(h * 0.025);
+                            const pad = fSize * 0.6;
+                            const lh = fSize * 1.4;
+                            
+                            ctx.font = `bold ${fSize}px Inter, sans-serif`;
+                            ctx.textBaseline = "top";
+
+                            // Data Block
+                            const lines = [
+                                `PROJECT: ${meta.projectId}`,
+                                `DATE: ${meta.dateString}`,
+                                `GPS: ${meta.lat ? meta.lat.toFixed(6) : '--'}, ${meta.lng ? meta.lng.toFixed(6) : '--'}`,
+                                `HEADING: ${meta.heading ? Math.round(meta.heading)+'°' : '--'}`,
+                                `NOTES: ${meta.caption}`
+                            ];
+
+                            // Calculate box height based on wrapping note
+                            let renderLines = [];
+                            const maxW = w - (pad*2);
+                            
+                            lines.forEach((l, i) => {
+                                if(i === lines.length - 1) { // Wrap note
+                                    const words = l.split(' ');
+                                    let line = words[0];
+                                    for(let j=1; j<words.length; j++) {
+                                        if(ctx.measureText(line + " " + words[j]).width < maxW) line += " " + words[j];
+                                        else { renderLines.push(line); line = words[j]; }
+                                    }
+                                    renderLines.push(line);
+                                } else {
+                                    renderLines.push(l);
+                                }
+                            });
+
+                            const boxH = (renderLines.length * lh) + (pad*2);
+                            
+                            // Draw Box
+                            ctx.fillStyle = "rgba(0,0,0,0.6)";
+                            ctx.fillRect(0, h - boxH, w, boxH);
+
+                            // Draw Text
+                            ctx.fillStyle = "#ffffff";
+                            let y = h - boxH + pad;
+                            renderLines.forEach(l => {
+                                ctx.fillText(l, pad, y);
+                                y += lh;
+                            });
+
+                            c.toBlob((b) => {
+                                if(b) resolve(b);
+                                else fallback();
+                            }, 'image/jpeg', 0.85);
+                        } catch(e) { fallback(); }
+                    };
+                    
+                    img.onerror = fallback; // Handle unsupported formats (HEIC etc)
+
                     try {
                         img.src = URL.createObjectURL(blob);
                     } catch(e) {
-                        resolve(blob); // Fallback to original if overload fails (should not happen with Blob)
+                        fallback();
                     }
                 });
             }
@@ -1148,7 +1162,7 @@
                     
                     if(item.type === 'photo') {
                         div.innerHTML = `
-                            <div class="w-24 bg-slate-100 relative cursor-pointer flex-none" onclick="window.app.showDetail('${item.id}')">
+                            <div class="w-24 h-24 bg-slate-100 relative cursor-pointer flex-none" onclick="window.app.showDetail('${item.id}')">
                                 <img src="${item.url}" class="w-full h-full object-cover">
                                 <div class="absolute inset-0 bg-black/0 hover:bg-black/10 transition"></div>
                             </div>
