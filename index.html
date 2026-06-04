@@ -11,7 +11,21 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script>try{if(typeof pdfjsLib!=='undefined')pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}catch(e){console.warn('PDF.js worker:',e.message);}</script>
+<script>
+// PDF.js worker configuration.
+// Under file:// protocol, skip workerSrc entirely - PDF.js will
+// handle rendering in degraded mode without crashing.
+// Under https:// (GitHub Pages), set the CDN worker normally.
+try {
+  if (typeof pdfjsLib !== 'undefined') {
+    if (window.location.protocol === 'https:' || window.location.protocol === 'http:') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    // Under file:// we deliberately leave workerSrc unset.
+    // PDF.js will still render pages, just without a dedicated worker thread.
+  }
+} catch(e) {}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:wght@400;500;600&display=swap" rel="stylesheet">
@@ -747,24 +761,45 @@ const EditorToolbar=memo(({engine,activePage,onUpdatePage,onInsertEngBlock})=>{
 });
 
 // ── Rich Text Editor ────────────────────────────────────────────────────────
-const RichEditor=memo(React.forwardRef(({content,onChange,engineRef,placeholder='Start writing...'},ref)=>{
+// Key insight: this component must be keyed by page.id at the call site.
+// On mount it loads initial content once. After that, the DOM is the
+// source of truth and onChange propagates changes up. We never write
+// back to innerHTML after mount to avoid cursor/race conflicts.
+const RichEditor=React.forwardRef(({content,onChange,engineRef,placeholder='Start writing...'},ref)=>{
   const elRef=useRef(null);
   const engineInst=useRef(null);
-  const lastKey=useRef(null);
+  const onChangeRef=useRef(onChange);
+  onChangeRef.current=onChange; // keep current without re-registering events
+
+  // Mount: load initial content and set up engine
   useEffect(()=>{
-    if(!engineInst.current&&elRef.current){
-      engineInst.current=new EditorEngine(elRef.current);
-      if(engineRef)engineRef.current=engineInst.current;
-    }
-  },[]);
-  useEffect(()=>{
-    if(elRef.current&&content!==undefined){
-      if(elRef.current.innerHTML!==(content||''))elRef.current.innerHTML=content||'';
-    }
-  },[content]);
+    if(!elRef.current)return;
+    // Set initial content once on mount
+    elRef.current.innerHTML=content||'';
+    // Set up editor engine
+    engineInst.current=new EditorEngine(elRef.current);
+    if(engineRef)engineRef.current=engineInst.current;
+    // Focus
+    elRef.current.focus();
+    // Place cursor at end
+    try{
+      const range=document.createRange();
+      const sel=window.getSelection();
+      range.selectNodeContents(elRef.current);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }catch(e){}
+    // Cleanup: clear engine ref on unmount
+    return function(){
+      if(engineRef)engineRef.current=null;
+      engineInst.current=null;
+    };
+  },[]); // empty deps - only runs on mount/unmount
+
   React.useImperativeHandle(ref,()=>elRef.current);
+
   const handleKeyDown=(e)=>{
-    lastKey.current=e.key;
     if(e.key==='Tab'){e.preventDefault();engineInst.current?.exec(e.shiftKey?'outdent':'indent');}
     if((e.ctrlKey||e.metaKey)&&e.key==='b'){e.preventDefault();engineInst.current?.bold();}
     if((e.ctrlKey||e.metaKey)&&e.key==='i'){e.preventDefault();engineInst.current?.italic();}
@@ -772,14 +807,15 @@ const RichEditor=memo(React.forwardRef(({content,onChange,engineRef,placeholder=
     if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();engineInst.current?.undo();}
     if((e.ctrlKey||e.metaKey)&&e.key==='y'){e.preventDefault();engineInst.current?.redo();}
   };
+
   return(
     <div ref={elRef} className="rte" contentEditable suppressContentEditableWarning
       data-placeholder={placeholder}
-      onInput={e=>onChange(e.currentTarget.innerHTML)}
+      onInput={e=>onChangeRef.current(e.currentTarget.innerHTML)}
       onKeyDown={handleKeyDown}
       style={{minHeight:'400px'}}/>
   );
-}));
+});
 
 // ── Eng Blocks Section ──────────────────────────────────────────────────────
 const EngBlocksSection=({blocks,onChange})=>{
@@ -824,7 +860,19 @@ const EngBlocksSection=({blocks,onChange})=>{
 // ── PDF Viewer ─────────────────────────────────────────────────────────────
 const PdfViewer=memo(({pageData})=>{
   const cvRef=useRef(null);const[doc,setDoc]=useState(null);const[page,setPage]=useState(1);const[scale,setScale]=useState(1.3);
-  useEffect(()=>{if(!pageData?.pdfData||typeof pdfjsLib==='undefined')return;pdfjsLib.getDocument(pageData.pdfData).promise.then(d=>{setDoc(d);setPage(1);}).catch(console.error);},[pageData]);
+  useEffect(()=>{
+    if(!pageData?.pdfData||typeof pdfjsLib==='undefined')return;
+    try{
+      pdfjsLib.getDocument({data:atob(pageData.pdfData.split(',')[1]||'')}).promise
+        .then(function(d){setDoc(d);setPage(1);})
+        .catch(function(e){console.warn('PDF load error:',e);});
+    }catch(e){
+      // Fallback: try passing data URL directly
+      pdfjsLib.getDocument(pageData.pdfData).promise
+        .then(function(d){setDoc(d);setPage(1);})
+        .catch(function(e2){console.warn('PDF fallback error:',e2);});
+    }
+  },[pageData]);
   useEffect(()=>{if(!doc||!cvRef.current)return;doc.getPage(page).then(p=>{const vp=p.getViewport({scale});const ctx=cvRef.current.getContext('2d');cvRef.current.height=vp.height;cvRef.current.width=vp.width;p.render({canvasContext:ctx,viewport:vp});});},[doc,page,scale]);
   return(
     <div style={{display:'flex',flexDirection:'column',alignItems:'center',background:'#e2e8f0',padding:'16px',overflowY:'auto',flex:1}} className="scr">
@@ -1256,27 +1304,50 @@ const SettingsModal=({settings,onSave,onClose,projects})=>{
 };
 
 // ── Diagnostics Modal ──────────────────────────────────────────────────────
-const DiagnosticsModal=({projects,syncStatus,onClose})=>{
+const DiagnosticsModal=({projects,syncStatus,onClose,selProj,selNote,selPage})=>{
   const notebooks=projects.reduce((a,p)=>a+(p.children?.length||0),0);
   const pages=projects.reduce((a,p)=>a+(p.children?.reduce((x,n)=>x+(n.children?.length||0),0)||0),0);
   const events=projects.reduce((a,p)=>a+(p.events?.length||0),0);
   const clients=[...new Set(projects.map(p=>p.client||'General'))];
+  const activeProj=projects.find(function(p){return p.id===selProj;});
+  const activeNb=activeProj&&(activeProj.children||[]).find(function(n){return n.id===selNote;});
+  const activePg=activeNb&&(activeNb.children||[]).find(function(p){return p.id===selPage;});
+  // Inspect first project structure
+  const firstProj=projects[0];
+  const firstProjKeys=firstProj?Object.keys(firstProj).join(', '):'none';
+  const firstNb=firstProj&&firstProj.children&&firstProj.children[0];
+  const firstNbKeys=firstNb?Object.keys(firstNb).join(', '):'none';
+  const firstPg=firstNb&&firstNb.children&&firstNb.children[0];
+  const firstPgKeys=firstPg?Object.keys(firstPg).join(', '):'none';
   return(
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" style={{width:'460px'}} onClick={e=>e.stopPropagation()}>
+      <div className="modal-box" style={{width:'560px'}} onClick={e=>e.stopPropagation()}>
         <div className="modal-header"><span className="modal-title">Diagnostics</span><button className="rail-btn" onClick={onClose}><I name="X" size={14}/></button></div>
-        <div className="modal-body">
+        <div className="modal-body scr" style={{maxHeight:'75vh',overflowY:'auto'}}>
           <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'10px',marginBottom:'14px'}}>
             {[['Projects',projects.length],['Notebooks',notebooks],['Pages',pages]].map(([l,v])=>(
               <div key={l} className="dash-card dash-stat"><div className="val">{v}</div><div className="lbl">{l}</div></div>
             ))}
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'10px',marginBottom:'14px'}}>
-            <div className="dash-card"><div style={{fontSize:'11px',color:'var(--text-3)',marginBottom:'4px'}}>Calendar Events</div><div style={{fontSize:'20px',fontWeight:700,color:'var(--accent-2)',fontFamily:'IBM Plex Mono'}}>{events}</div></div>
-            <div className="dash-card"><div style={{fontSize:'11px',color:'var(--text-3)',marginBottom:'4px'}}>Sync Status</div><div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'4px'}}><div className={'sync-dot '+syncStatus}/><span style={{fontSize:'12px',color:'var(--text-1)',fontWeight:500,textTransform:'capitalize'}}>{syncStatus}</span></div></div>
-          </div>
-          <div style={{background:'#0f1117',borderRadius:'6px',padding:'14px',fontFamily:'IBM Plex Mono',fontSize:'11px',color:'#4ade80',lineHeight:1.8}}>
-            APP_VERSION = {APP_VER}<br/>DB = {DB_NAME} v{DB_VER}<br/>CLIENTS = [{clients.join(', ')}]<br/>SYNC = {syncStatus.toUpperCase()}
+          <div style={{background:'#0f1117',borderRadius:'6px',padding:'14px',fontFamily:'IBM Plex Mono',fontSize:'11px',color:'#4ade80',lineHeight:1.9,marginBottom:'10px',overflowX:'auto'}}>
+            <div style={{color:'#94a3b8',marginBottom:'4px'}}>── SELECTION STATE ──</div>
+            selProj: {selProj||'null'}<br/>
+            selNote: {selNote||'null'}<br/>
+            selPage: {selPage||'null'}<br/>
+            activeProj: {activeProj?activeProj.title:'NOT FOUND'}<br/>
+            activeNb: {activeNb?activeNb.title:'NOT FOUND'}<br/>
+            activePg: {activePg?activePg.title:'NOT FOUND'}<br/>
+            <div style={{color:'#94a3b8',margin:'6px 0 4px'}}>── DATA STRUCTURE ──</div>
+            project[0] keys: {firstProjKeys}<br/>
+            notebook[0] keys: {firstNbKeys}<br/>
+            page[0] keys: {firstPgKeys}<br/>
+            <div style={{color:'#94a3b8',margin:'6px 0 4px'}}>── FIRST PAGE SAMPLE ──</div>
+            id: {firstPg?firstPg.id:'none'}<br/>
+            title: {firstPg?firstPg.title:'none'}<br/>
+            type: {firstPg?firstPg.type:'none'}<br/>
+            content length: {firstPg&&firstPg.content?firstPg.content.length+' chars':'0'}<br/>
+            <div style={{color:'#94a3b8',margin:'6px 0 4px'}}>── APP ──</div>
+            DB = {DB_NAME} v{DB_VER}<br/>SYNC = {syncStatus.toUpperCase()}
           </div>
         </div>
         <div className="modal-footer"><button className="btn btn-primary" onClick={onClose}>Close</button></div>
@@ -1402,36 +1473,14 @@ function App(){
           }
         }catch(e){console.warn('Eng block migration error:',e);}
         setProjects(data);
-        // Restore session
-        const lp=localStorage.getItem('lc_lastProj');
-        if(lp&&data.find(function(p){return p.id===lp;})){
-          setSelProj(lp);
-          const ln=localStorage.getItem('lc_lastNote');if(ln)setSelNote(ln);
-          const lpg=localStorage.getItem('lc_lastPage');if(lpg){
-            // Verify the page still exists and resolve its parent chain
-            let verifiedProj=lp,verifiedNote=ln;
-            for(let i=0;i<data.length;i++){
-              const proj=data[i];
-              const nbs=proj.children||[];
-              for(let j=0;j<nbs.length;j++){
-                const nb=nbs[j];
-                const pgs=nb.children||[];
-                for(let k=0;k<pgs.length;k++){
-                  if(pgs[k].id===lpg){verifiedProj=proj.id;verifiedNote=nb.id;break;}
-                }
-                if(verifiedNote!==ln)break;
-              }
-              if(verifiedProj!==lp)break;
-            }
-            setSelProj(verifiedProj);
-            setSelNote(verifiedNote);
-            setSelPage(lpg);
-          }
-        } else if(data.length){setSelProj(data[0].id);}
+        // Store session data for restoration after projects state updates
+        // Using a ref avoids the async batching race between setProjects and setSelXxx
+        window._lcInitData=data;
+        setStatus('ready');
         // Templates
         const tpls=await idb.getAllTemplates();
         setTemplates(tpls.length?tpls:INITIAL_TEMPLATES);
-        setStatus('ready');
+        // status is set to ready after projects are stored (above)
       }catch(e){console.error(e);setStatus('error');}
     };
     init();
@@ -1441,6 +1490,46 @@ function App(){
   },[]);
 
   // Auto-save
+  // Session restore effect: fires after projects state is populated
+  // Runs once when projects goes from empty to populated
+  const sessionRestored=useRef(false);
+  useEffect(()=>{
+    if(sessionRestored.current)return;
+    if(!projects.length)return;
+    if(!window._lcInitData)return;
+    sessionRestored.current=true;
+    const data=window._lcInitData;
+    delete window._lcInitData;
+    const lp=localStorage.getItem('lc_lastProj');
+    let selP=null,selN=null,selPg=null;
+    if(lp&&data.find(function(p){return p.id===lp;})){
+      selP=lp;
+      const ln=localStorage.getItem('lc_lastNote');
+      const lpg=localStorage.getItem('lc_lastPage');
+      // Walk the tree to verify and resolve the full parent chain
+      outer:for(let i=0;i<data.length;i++){
+        const proj=data[i];
+        const nbs=proj.children||[];
+        for(let j=0;j<nbs.length;j++){
+          const nb=nbs[j];
+          const pgs=nb.children||[];
+          for(let k=0;k<pgs.length;k++){
+            if(pgs[k].id===lpg){selP=proj.id;selN=nb.id;selPg=lpg;break outer;}
+          }
+        }
+      }
+      if(!selPg&&ln){
+        // No matching page - just restore notebook
+        selN=ln;
+      }
+    } else if(data.length){
+      selP=data[0].id;
+    }
+    if(selP)setSelProj(selP);
+    if(selN)setSelNote(selN);
+    if(selPg)setSelPage(selPg);
+  },[projects]);
+
   const dProjects=useDebounce(projects,700);
   useEffect(()=>{
     if(status!=='ready')return;
@@ -1468,17 +1557,54 @@ function App(){
 
   // Derived state
   const updateTree=useCallback(fn=>setProjects(prev=>prev.map(fn)),[]);
-  const activeProject=useMemo(()=>projects.find(p=>p.id===selProj),[projects,selProj]);
-  const activeNotebook=useMemo(()=>activeProject?.children?.find(n=>n.id===selNote),[activeProject,selNote]);
-  const activePage=useMemo(()=>activeNotebook?.children?.find(p=>p.id===selPage),[activeNotebook,selPage]);
-  const secondaryPage=useMemo(()=>{
-    if(!selPage2)return null;
-    for(const p of projects)for(const n of(p.children||[]))for(const pg of(n.children||[]))if(pg.id===selPage2)return pg;
-    return null;
-  },[projects,selPage2]);
+  // Single-pass lookup: derive all three levels in one memo
+  // avoids the cascading dependency chain that fails when state updates are batched
+  const {activeProject,activeNotebook,activePage}=useMemo(()=>{
+    const proj=projects.find(function(p){return p.id===selProj;})||null;
+    const nb=proj?(proj.children||[]).find(function(n){return n.id===selNote;})||null:null;
+    const pg=nb?(nb.children||[]).find(function(p){return p.id===selPage;})||null:null;
+    return{activeProject:proj,activeNotebook:nb,activePage:pg};
+  },[projects,selProj,selNote,selPage]);
 
-  const updatePageContent=useCallback((id,content)=>{
-    setProjects(prev=>prev.map(p=>({...p,children:p.children?.map(n=>({...n,children:n.children?.map(pg=>pg.id===id?{...pg,content}:pg)}))})));
+  // DEBUG: publish live selection state for the on-screen debug bar
+  useEffect(function(){
+    window._lcSel={
+      selProj:selProj,selNote:selNote,selPage:selPage,
+      hasProj:!!activeProject,hasNote:!!activeNotebook,hasPage:!!activePage,
+      pgTitle:activePage?activePage.title:null,
+      projChildCount:activeProject&&activeProject.children?activeProject.children.length:0,
+      noteChildCount:activeNotebook&&activeNotebook.children?activeNotebook.children.length:0
+    };
+  },[selProj,selNote,selPage,activeProject,activeNotebook,activePage]);
+
+  const secondaryInfo=useMemo(()=>{
+    if(!selPage2)return{secondaryPage:null};
+    for(let i=0;i<projects.length;i++){
+      const nbs=projects[i].children||[];
+      for(let j=0;j<nbs.length;j++){
+        const pgs=nbs[j].children||[];
+        for(let k=0;k<pgs.length;k++){
+          if(pgs[k].id===selPage2)return{secondaryPage:pgs[k]};
+        }
+      }
+    }
+    return{secondaryPage:null};
+  },[projects,selPage2]);
+  const secondaryPage=secondaryInfo.secondaryPage;
+  // secondaryPage now derived in secondaryInfo memo above
+
+  const updatePageContent=useCallback((id,html)=>{
+    // Uses functional updater - safe with empty dep array
+    // The prev=> form always operates on current state regardless of closure age
+    setProjects(function(prev){
+      return prev.map(function(p){
+        return Object.assign({},p,{children:(p.children||[]).map(function(n){
+          return Object.assign({},n,{children:(n.children||[]).map(function(pg){
+            return pg.id===id?Object.assign({},pg,{content:html}):pg;
+          })});
+        })});
+      });
+    });
   },[]);
   const updatePageProp=useCallback((updates)=>{
     if(!activePage)return;
@@ -1642,7 +1768,7 @@ function App(){
           <hr className="page-divider"/>
           {page.mimeType==='application/pdf'?<PdfViewer pageData={page}/>:(
             <>
-              <RichEditor engineRef={engineR} content={page.content} onChange={html=>updatePageContent(page.id,html)}/>
+              <RichEditor key={page.id} engineRef={engineR} content={page.content} onChange={html=>updatePageContent(page.id,html)}/>
               <EngBlocksSection blocks={pageBlocks} onChange={function(blocks){
                 const tgtId=page.id;
                 updateTree(function(p){
@@ -1666,6 +1792,13 @@ function App(){
     <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:'16px',background:'var(--panel-bg)'}}>
       <div style={{width:'40px',height:'40px',background:'var(--accent)',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'IBM Plex Mono',fontWeight:600,fontSize:'13px',color:'white',boxShadow:'0 0 24px rgba(37,99,235,0.5)'}}>LC</div>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+      <div style={{fontSize:'12px',color:'var(--text-3)',fontFamily:'IBM Plex Mono'}}>Loading data...</div>
+    </div>
+  );
+  if(status==='error')return(
+    <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:'12px',background:'var(--panel-bg)',padding:'40px'}}>
+      <div style={{fontSize:'16px',fontWeight:700,color:'#ef4444'}}>Initialization Error</div>
+      <div style={{fontSize:'12px',color:'var(--text-3)',fontFamily:'IBM Plex Mono',textAlign:'center',maxWidth:'400px'}}>Check browser console for details. Try opening in an incognito window.</div>
     </div>
   );
 
@@ -1755,7 +1888,7 @@ function App(){
             <div className="panel-body scr">
               {(activeNotebook?.children||[]).map(pg=>(
                 <SidebarItem key={pg.id} item={pg} icon="📄" isSelected={selPage===pg.id} isEditing={editingId===pg.id} editValue={editVal}
-                  depth={pg.level||0} onEditChange={setEditVal} onSelect={selectPage} onEditStart={startEdit}
+                  depth={pg.level||0} onEditChange={setEditVal} onSelect={(e,id)=>selectPage(id,e)} onEditStart={startEdit}
                   onEditSave={id=>saveEdit(id,'page')} onEditKeyDown={(e,id)=>editKeyDown(e,id,'page')} onDelete={delPage}
                   onIndent={indentPage} onOutdent={outdentPage}/>
               ))}
@@ -1835,13 +1968,60 @@ function App(){
       {/* Modals */}
       {modal==='search'&&<SearchOverlay projects={projects} onClose={()=>setModal(null)} onSelect={function(r){setSelProj(r.projId);setSelNote(r.notebookId);setSelPage(r.id);setActivePane('primary');setMobileView('editor');setModal(null);}}/>}
       {modal==='settings'&&<SettingsModal settings={settings} projects={projects} onClose={()=>setModal(null)} onSave={s=>{setSettings(s);idb.putSetting('appSettings',s);try{localStorage.setItem('neuronote_settings',JSON.stringify(s));}catch(e){}}}/>}
-      {modal==='diag'&&<DiagnosticsModal projects={projects} syncStatus={syncStatus} onClose={()=>setModal(null)}/>}
+      {modal==='diag'&&<DiagnosticsModal projects={projects} syncStatus={syncStatus} onClose={()=>setModal(null)} selProj={selProj} selNote={selNote} selPage={selPage}/>}
       {modal==='templates'&&<TemplateModal templates={templates} onLoad={loadTemplate} onDelete={delTemplate} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+// ── Debug overlay (remove after confirming navigation works) ──────────────
+function DebugBar(){
+  const[info,setInfo]=React.useState('');
+  React.useEffect(()=>{
+    const h=setInterval(()=>{
+      try{
+        const req=indexedDB.open('LoCoNotesV2',3);
+        req.onsuccess=function(e){
+          const db=e.target.result;
+          const tx=db.transaction('projects','readonly');
+          const store=tx.objectStore('projects');
+          const all=store.getAll();
+          all.onsuccess=function(){
+            const data=all.result||[];
+            const totalNbs=data.reduce(function(a,p){return a+(p.children?p.children.length:0);},0);
+            const totalPgs=data.reduce(function(a,p){return a+(p.children?p.children.reduce(function(x,n){return x+(n.children?n.children.length:0);},0):0);},0);
+            var sel=window._lcSel||{};
+            var line2='SEL → proj:'+(sel.selProj?String(sel.selProj).slice(-6):'null')
+              +' note:'+(sel.selNote?String(sel.selNote).slice(-6):'null')
+              +' page:'+(sel.selPage?String(sel.selPage).slice(-6):'null')
+              +' | RESOLVED → proj:'+(sel.hasProj?'Y':'N')
+              +' note:'+(sel.hasNote?'Y':'N')
+              +' page:'+(sel.hasPage?'Y':'N')
+              +(sel.hasProj&&!sel.hasNote?' [proj has '+sel.projChildCount+' notebooks]':'')
+              +(sel.hasNote&&!sel.hasPage?' [notebook has '+sel.noteChildCount+' pages]':'');
+            setInfo('DB: '+data.length+'P / '+totalNbs+'N / '+totalPgs+'pg | '+window.location.protocol+'\n'+line2);
+            db.close();
+          };
+        };
+        req.onerror=function(){setInfo('DB ERROR: cannot open LoCoNotesV2');};
+      }catch(ex){setInfo('ERROR: '+ex.message);}
+    },500);
+    return function(){clearInterval(h);};
+  },[]);
+  return React.createElement('div',{
+    style:{position:'fixed',bottom:0,left:0,right:0,background:'rgba(0,0,0,0.9)',
+      color:'#4ade80',fontFamily:'IBM Plex Mono, monospace',fontSize:'11px',
+      padding:'6px 12px',zIndex:9999,borderTop:'1px solid #334155',
+      whiteSpace:'pre-line',lineHeight:1.5}
+  },(info||'Initializing...')+'\nDEBUG MODE — click a page; watch the SEL/RESOLVED line');
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  React.createElement(React.Fragment,null,
+    React.createElement(App,null),
+    React.createElement(DebugBar,null)
+  )
+);
 </script>
 </body>
 </html>
