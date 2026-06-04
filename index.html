@@ -1407,7 +1407,26 @@ function App(){
         if(lp&&data.find(function(p){return p.id===lp;})){
           setSelProj(lp);
           const ln=localStorage.getItem('lc_lastNote');if(ln)setSelNote(ln);
-          const lpg=localStorage.getItem('lc_lastPage');if(lpg)setSelPage(lpg);
+          const lpg=localStorage.getItem('lc_lastPage');if(lpg){
+            // Verify the page still exists and resolve its parent chain
+            let verifiedProj=lp,verifiedNote=ln;
+            for(let i=0;i<data.length;i++){
+              const proj=data[i];
+              const nbs=proj.children||[];
+              for(let j=0;j<nbs.length;j++){
+                const nb=nbs[j];
+                const pgs=nb.children||[];
+                for(let k=0;k<pgs.length;k++){
+                  if(pgs[k].id===lpg){verifiedProj=proj.id;verifiedNote=nb.id;break;}
+                }
+                if(verifiedNote!==ln)break;
+              }
+              if(verifiedProj!==lp)break;
+            }
+            setSelProj(verifiedProj);
+            setSelNote(verifiedNote);
+            setSelPage(lpg);
+          }
         } else if(data.length){setSelProj(data[0].id);}
         // Templates
         const tpls=await idb.getAllTemplates();
@@ -1489,8 +1508,31 @@ function App(){
 
   // Navigation
   const selectPage=(pageId,e)=>{
-    if(e?.altKey){setSelPage2(pageId);setSplitMode(true);setActivePane('secondary');}
-    else{setSelPage(pageId);setActivePane('primary');setMobileView('editor');}
+    // Always resolve parent notebook and project from pageId
+    // so the lookup chain activeProject->activeNotebook->activePage never breaks
+    let foundProjId=null,foundNoteId=null;
+    for(let i=0;i<projects.length;i++){
+      const proj=projects[i];
+      const nbs=proj.children||[];
+      for(let j=0;j<nbs.length;j++){
+        const nb=nbs[j];
+        const pgs=nb.children||[];
+        for(let k=0;k<pgs.length;k++){
+          if(pgs[k].id===pageId){foundProjId=proj.id;foundNoteId=nb.id;break;}
+        }
+        if(foundNoteId)break;
+      }
+      if(foundProjId)break;
+    }
+    if(e?.altKey){
+      setSelPage2(pageId);setSplitMode(true);setActivePane('secondary');
+    } else {
+      if(foundProjId)setSelProj(foundProjId);
+      if(foundNoteId)setSelNote(foundNoteId);
+      setSelPage(pageId);
+      setActivePane('primary');
+      setMobileView('editor');
+    }
   };
   const selectProject=(id)=>{setSelProj(id);setSelNote(null);setSelPage(null);setMobileView('notebooks');};
   const selectNotebook=(id)=>{setSelNote(id);setSelPage(null);setMobileView('pages');};
@@ -1791,7 +1833,7 @@ function App(){
       </div>
 
       {/* Modals */}
-      {modal==='search'&&<SearchOverlay projects={projects} onClose={()=>setModal(null)} onSelect={r=>{setSelProj(r.projId);setSelNote(r.notebookId);setSelPage(r.id);setMobileView('editor');setModal(null);}}/>}
+      {modal==='search'&&<SearchOverlay projects={projects} onClose={()=>setModal(null)} onSelect={function(r){setSelProj(r.projId);setSelNote(r.notebookId);setSelPage(r.id);setActivePane('primary');setMobileView('editor');setModal(null);}}/>}
       {modal==='settings'&&<SettingsModal settings={settings} projects={projects} onClose={()=>setModal(null)} onSave={s=>{setSettings(s);idb.putSetting('appSettings',s);try{localStorage.setItem('neuronote_settings',JSON.stringify(s));}catch(e){}}}/>}
       {modal==='diag'&&<DiagnosticsModal projects={projects} syncStatus={syncStatus} onClose={()=>setModal(null)}/>}
       {modal==='templates'&&<TemplateModal templates={templates} onLoad={loadTemplate} onDelete={delTemplate} onClose={()=>setModal(null)}/>}
