@@ -1566,17 +1566,6 @@ function App(){
     return{activeProject:proj,activeNotebook:nb,activePage:pg};
   },[projects,selProj,selNote,selPage]);
 
-  // DEBUG: publish live selection state for the on-screen debug bar
-  useEffect(function(){
-    window._lcSel={
-      selProj:selProj,selNote:selNote,selPage:selPage,
-      hasProj:!!activeProject,hasNote:!!activeNotebook,hasPage:!!activePage,
-      pgTitle:activePage?activePage.title:null,
-      projChildCount:activeProject&&activeProject.children?activeProject.children.length:0,
-      noteChildCount:activeNotebook&&activeNotebook.children?activeNotebook.children.length:0
-    };
-  },[selProj,selNote,selPage,activeProject,activeNotebook,activePage]);
-
   const secondaryInfo=useMemo(()=>{
     if(!selPage2)return{secondaryPage:null};
     for(let i=0;i<projects.length;i++){
@@ -1975,53 +1964,7 @@ function App(){
 }
 
 // ── Debug overlay (remove after confirming navigation works) ──────────────
-function DebugBar(){
-  const[info,setInfo]=React.useState('');
-  React.useEffect(()=>{
-    const h=setInterval(()=>{
-      try{
-        const req=indexedDB.open('LoCoNotesV2',3);
-        req.onsuccess=function(e){
-          const db=e.target.result;
-          const tx=db.transaction('projects','readonly');
-          const store=tx.objectStore('projects');
-          const all=store.getAll();
-          all.onsuccess=function(){
-            const data=all.result||[];
-            const totalNbs=data.reduce(function(a,p){return a+(p.children?p.children.length:0);},0);
-            const totalPgs=data.reduce(function(a,p){return a+(p.children?p.children.reduce(function(x,n){return x+(n.children?n.children.length:0);},0):0);},0);
-            var sel=window._lcSel||{};
-            var line2='SEL → proj:'+(sel.selProj?String(sel.selProj).slice(-6):'null')
-              +' note:'+(sel.selNote?String(sel.selNote).slice(-6):'null')
-              +' page:'+(sel.selPage?String(sel.selPage).slice(-6):'null')
-              +' | RESOLVED → proj:'+(sel.hasProj?'Y':'N')
-              +' note:'+(sel.hasNote?'Y':'N')
-              +' page:'+(sel.hasPage?'Y':'N')
-              +(sel.hasProj&&!sel.hasNote?' [proj has '+sel.projChildCount+' notebooks]':'')
-              +(sel.hasNote&&!sel.hasPage?' [notebook has '+sel.noteChildCount+' pages]':'');
-            setInfo('DB: '+data.length+'P / '+totalNbs+'N / '+totalPgs+'pg | '+window.location.protocol+'\n'+line2);
-            db.close();
-          };
-        };
-        req.onerror=function(){setInfo('DB ERROR: cannot open LoCoNotesV2');};
-      }catch(ex){setInfo('ERROR: '+ex.message);}
-    },500);
-    return function(){clearInterval(h);};
-  },[]);
-  return React.createElement('div',{
-    style:{position:'fixed',bottom:0,left:0,right:0,background:'rgba(0,0,0,0.9)',
-      color:'#4ade80',fontFamily:'IBM Plex Mono, monospace',fontSize:'11px',
-      padding:'6px 12px',zIndex:9999,borderTop:'1px solid #334155',
-      whiteSpace:'pre-line',lineHeight:1.5}
-  },(info||'Initializing...')+'\nDEBUG MODE — click a page; watch the SEL/RESOLVED line');
-}
-
-ReactDOM.createRoot(document.getElementById('root')).render(
-  React.createElement(React.Fragment,null,
-    React.createElement(App,null),
-    React.createElement(DebugBar,null)
-  )
-);
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
 </html>
