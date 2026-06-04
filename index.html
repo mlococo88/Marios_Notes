@@ -1357,23 +1357,44 @@ function App(){
         const cl=[...new Set(data.map(p=>p.client||'General'))];
         setClients(cl);
         const exp={};cl.forEach(c=>exp[c]=true);setExpanded(exp);
-        // Apply any pending eng block migration from localStorage
-        if(window._pendingEngBlocks){
-          const eb=window._pendingEngBlocks;
-          data=data.map(p=>({...p,children:p.children?.map(n=>({...n,children:n.children?.map(pg=>{
-            if(eb[pg.id]&&(!pg.engBlocks||!pg.engBlocks.length)){
-              return{...pg,engBlocks:eb[pg.id]};
-            }
-            return pg;
-          }))}))});
-          delete window._pendingEngBlocks;
-          localStorage.removeItem('lc_engBlocks');
-          console.log('[LoCoNotes] Eng block migration applied.');
-        }
+        // Migrate eng blocks from localStorage into page records (one-time)
+        try{
+          const rawEb=localStorage.getItem('lc_engBlocks');
+          if(rawEb){
+            const eb=JSON.parse(rawEb);
+            const migrateBlocks=function(projects,ebMap){
+              const result=[];
+              for(let i=0;i<projects.length;i++){
+                const proj=projects[i];
+                const notebooks=proj.children||[];
+                const newNbs=[];
+                for(let j=0;j<notebooks.length;j++){
+                  const nb=notebooks[j];
+                  const pages=nb.children||[];
+                  const newPgs=[];
+                  for(let k=0;k<pages.length;k++){
+                    const pg=pages[k];
+                    if(ebMap[pg.id]&&(!pg.engBlocks||pg.engBlocks.length===0)){
+                      newPgs.push(Object.assign({},pg,{engBlocks:ebMap[pg.id]}));
+                    } else {
+                      newPgs.push(pg);
+                    }
+                  }
+                  newNbs.push(Object.assign({},nb,{children:newPgs}));
+                }
+                result.push(Object.assign({},proj,{children:newNbs}));
+              }
+              return result;
+            };
+            data=migrateBlocks(data,eb);
+            localStorage.removeItem('lc_engBlocks');
+            console.log('[LoCoNotes] Eng block migration complete.');
+          }
+        }catch(e){console.warn('Eng block migration error:',e);}
         setProjects(data);
         // Restore session
         const lp=localStorage.getItem('lc_lastProj');
-        if(lp&&data.find(p=>p.id===lp)){
+        if(lp&&data.find(function(p){return p.id===lp;})){
           setSelProj(lp);
           const ln=localStorage.getItem('lc_lastNote');if(ln)setSelNote(ln);
           const lpg=localStorage.getItem('lc_lastPage');if(lpg)setSelPage(lpg);
@@ -1381,20 +1402,6 @@ function App(){
         // Templates
         const tpls=await idb.getAllTemplates();
         setTemplates(tpls.length?tpls:INITIAL_TEMPLATES);
-        // Eng blocks
-        // Migrate any existing engBlocks from localStorage into page records
-        try{
-          const eb=localStorage.getItem('lc_engBlocks');
-          if(eb){
-            const parsed=JSON.parse(eb);
-            const keys=Object.keys(parsed);
-            if(keys.length>0){
-              console.log('[LoCoNotes] Migrating eng blocks from localStorage...');
-              // Will be applied after projects load
-              window._pendingEngBlocks=parsed;
-            }
-          }
-        }catch(e){}
         setStatus('ready');
       }catch(e){console.error(e);setStatus('error');}
     };
@@ -1452,10 +1459,22 @@ function App(){
   const insertEngBlock=(type)=>{
     if(!activePage)return;
     const id='eb_'+Date.now();
-    const nb={id,type,title:ENG_BLOCK_TYPES.find(b=>b.id===type)?.label||type};
-    updateTree(p=>({...p,children:p.children?.map(n=>({...n,children:n.children?.map(pg=>
-      pg.id===activePage.id?{...pg,engBlocks:[...(pg.engBlocks||[]),nb]}:pg
-    )}))}));
+    const blockTitle=ENG_BLOCK_TYPES.find(function(b){return b.id===type;});
+    const nb={id:id,type:type,title:blockTitle?blockTitle.label:type};
+    const pageId=activePage.id;
+    updateTree(function(p){
+      const newNbs=(p.children||[]).map(function(n){
+        const newPgs=(n.children||[]).map(function(pg){
+          if(pg.id===pageId){
+            const existing=pg.engBlocks||[];
+            return Object.assign({},pg,{engBlocks:existing.concat([nb])});
+          }
+          return pg;
+        });
+        return Object.assign({},n,{children:newPgs});
+      });
+      return Object.assign({},p,{children:newNbs});
+    });
   };
 
   // Navigation
@@ -1572,10 +1591,17 @@ function App(){
           {page.mimeType==='application/pdf'?<PdfViewer pageData={page}/>:(
             <>
               <RichEditor engineRef={engineR} content={page.content} onChange={html=>updatePageContent(page.id,html)}/>
-              <EngBlocksSection blocks={pageBlocks} onChange={blocks=>{
-                updateTree(p=>({...p,children:p.children?.map(n=>({...n,children:n.children?.map(pg=>
-                  pg.id===page.id?{...pg,engBlocks:blocks}:pg
-                )}))}));
+              <EngBlocksSection blocks={pageBlocks} onChange={function(blocks){
+                const tgtId=page.id;
+                updateTree(function(p){
+                  const newNbs=(p.children||[]).map(function(n){
+                    const newPgs=(n.children||[]).map(function(pg){
+                      return pg.id===tgtId?Object.assign({},pg,{engBlocks:blocks}):pg;
+                    });
+                    return Object.assign({},n,{children:newPgs});
+                  });
+                  return Object.assign({},p,{children:newNbs});
+                });
               }}/>
             </>
           )}
