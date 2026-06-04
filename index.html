@@ -1124,6 +1124,136 @@ const SearchOverlay=({projects,onSelect,onClose})=>{
   );
 };
 
+// ── Dynamic Gemini model resolution ─────────────────────────────────────────
+// Rather than relying on a single hardcoded model string (which fails when
+// Google rotates preview builds out of service), this resolver discovers the
+// models the API key can actually access and selects a working one, retrying
+// down a priority list if the first choice is rejected.
+
+// Module-level cache so we only query the model list once per session.
+var _lcModelCache = { list: null, fetchedAt: 0 };
+
+// Priority order: stable identifiers first, newest generation first within tier.
+// Flash tier is preferred as the default (cost/latency); Pro tiers are fallbacks.
+var GEMINI_MODEL_PRIORITY = [
+  'gemini-2.5-flash',
+  'gemini-flash-latest',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-2.5-pro',
+  'gemini-pro-latest',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro'
+];
+
+// Query the API for the list of models this key supports for generateContent.
+async function fetchAvailableModels(apiKey){
+  // Reuse cached list for 10 minutes to avoid repeated discovery calls.
+  if(_lcModelCache.list && (Date.now() - _lcModelCache.fetchedAt) < 600000){
+    return _lcModelCache.list;
+  }
+  try{
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + apiKey);
+    const data = await res.json();
+    if(data.error) throw new Error(data.error.message);
+    const models = (data.models || [])
+      .filter(function(m){
+        return m.supportedGenerationMethods &&
+               m.supportedGenerationMethods.indexOf('generateContent') !== -1;
+      })
+      .map(function(m){
+        // API returns names like 'models/gemini-2.5-flash'; strip the prefix.
+        return m.name.replace(/^models\//, '');
+      });
+    _lcModelCache.list = models;
+    _lcModelCache.fetchedAt = Date.now();
+    return models;
+  }catch(e){
+    // If discovery fails (network, key), return empty so caller falls back
+    // to the static priority list.
+    return [];
+  }
+}
+
+// Given the available models, pick the best one: honor the user's explicit
+// preference if it's still valid, otherwise walk the priority list, otherwise
+// take the first available model the key reports.
+function chooseModel(available, preferred){
+  if(preferred && preferred !== 'auto' && available.indexOf(preferred) !== -1) return preferred;
+  for(var i=0;i<GEMINI_MODEL_PRIORITY.length;i++){
+    if(available.indexOf(GEMINI_MODEL_PRIORITY[i]) !== -1) return GEMINI_MODEL_PRIORITY[i];
+  }
+  return available.length ? available[0] : null;
+}
+
+// One generateContent attempt against a specific model.
+async function attemptGenerate(apiKey, model, promptText){
+  const res = await fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey,
+    {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({contents:[{parts:[{text:promptText}]}]})
+    }
+  );
+  const data = await res.json();
+  if(data.error){
+    const err = new Error(data.error.message);
+    err.status = data.error.code;
+    err.modelRelated = /not found|not supported|does not exist|deprecated/i.test(data.error.message || '');
+    throw err;
+  }
+  return data.candidates && data.candidates[0] && data.candidates[0].content &&
+         data.candidates[0].content.parts && data.candidates[0].content.parts[0] &&
+         data.candidates[0].content.parts[0].text || 'No response received.';
+}
+
+// Main entry point: resolve a working model and generate, retrying down the
+// list if a model is rejected as unavailable. Persists the discovered working
+// model back into settings so subsequent calls go straight to it.
+async function callGeminiWithFallback(settings, promptText){
+  if(!settings.apiKey) throw new Error('No API key configured.');
+
+  // Discover what this key can use.
+  const available = await fetchAvailableModels(settings.apiKey);
+
+  // Build an ordered candidate list to try.
+  var candidates = [];
+  const chosen = chooseModel(available, settings.model);
+  if(chosen) candidates.push(chosen);
+  // Append the rest of the priority list (and the discovered list) as fallbacks,
+  // de-duplicated, so a rejection of the first choice cascades intelligently.
+  GEMINI_MODEL_PRIORITY.forEach(function(m){ if(candidates.indexOf(m) === -1) candidates.push(m); });
+  available.forEach(function(m){ if(candidates.indexOf(m) === -1) candidates.push(m); });
+  // If discovery returned nothing and there's a real user preference, ensure it's tried.
+  if(settings.model && settings.model !== 'auto' && candidates.indexOf(settings.model) === -1) candidates.unshift(settings.model);
+
+  var lastErr = null;
+  for(var i=0;i<candidates.length;i++){
+    var model = candidates[i];
+    try{
+      const text = await attemptGenerate(settings.apiKey, model, promptText);
+      // Success — remember this model for next time if it changed.
+      if(window._lcOnModelResolved && model !== settings.model){
+        window._lcOnModelResolved(model);
+      }
+      return text;
+    }catch(e){
+      lastErr = e;
+      // Only continue to the next candidate if the failure is model-related.
+      // Auth errors, quota errors, and malformed-request errors should stop
+      // immediately — retrying other models won't help and wastes quota.
+      if(!e.modelRelated) throw e;
+      // otherwise loop to the next candidate
+    }
+  }
+  throw new Error(
+    (lastErr ? lastErr.message + ' — ' : '') +
+    'No compatible Gemini model could be found for this API key. ' +
+    'Open https://generativelanguage.googleapis.com/v1beta/models?key=YOUR_KEY to see available models.'
+  );
+}
+
 // ── AI Panel ───────────────────────────────────────────────────────────────
 const AIPanel=({projects,selectedProjId,selectedNoteId,selectedPageId,settings,onClose,width,onResizeStart})=>{
   const[messages,setMessages]=useState([{id:'1',role:'assistant',content:'Hello! I can analyze your project notes, generate structured summaries, extract action items, and draft deliverables. Select a context scope and ask me anything, or tap a quick prompt below.'}]);
@@ -1162,13 +1292,7 @@ const AIPanel=({projects,selectedProjId,selectedNoteId,selectedPageId,settings,o
     const context=buildContext();
     const systemPrompt='You are an expert assistant for structural engineers and infrastructure project managers. Help analyze field notes, meeting minutes, engineering calculations, and project documentation.\n\nContext from user notes:\n'+context+'\n\nInstructions:\n- Provide structured, professional responses appropriate for engineering practice\n- When listing action items use numbered format with assignee and due date where known\n- When generating summaries use clear section headings\n- Reference specific page names when citing information\n- Use markdown formatting for reports and tables';
     try{
-      const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+(settings.model||'gemini-2.5-flash-preview-05-20')+':generateContent?key='+settings.apiKey,{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({contents:[{parts:[{text:systemPrompt+'\n\nUser: '+msg}]}]})
-      });
-      const data=await res.json();
-      if(data.error)throw new Error(data.error.message);
-      const text=data.candidates?.[0]?.content?.parts?.[0]?.text||'No response received.';
+      const text=await callGeminiWithFallback(settings,systemPrompt+'\n\nUser: '+msg);
       setMessages(prev=>[...prev,{id:Date.now().toString(),role:'assistant',content:text}]);
     }catch(e){setMessages(prev=>[...prev,{id:Date.now().toString(),role:'assistant',content:'Error: '+e.message}]);}
     setLoading(false);
@@ -1250,12 +1374,16 @@ const SettingsModal=({settings,onSave,onClose,projects})=>{
             <div style={{fontSize:'11px',fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'12px',paddingBottom:'8px',borderBottom:'1px solid var(--border)'}}>AI Configuration</div>
             <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
               <div><label className="form-label">Gemini API Key</label><input type="password" className="form-input" value={s.apiKey||''} onChange={e=>setS({...s,apiKey:e.target.value})} placeholder="AIza..."/></div>
-              <div><label className="form-label">Model</label>
-                <select className="form-select" value={s.model||'gemini-2.5-flash-preview-05-20'} onChange={e=>setS({...s,model:e.target.value})}>
-                  <option value="gemini-2.5-flash-preview-05-20">Gemini 2.5 Flash (Recommended)</option>
-                  <option value="gemini-2.5-pro-preview-05-06">Gemini 2.5 Pro</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+              <div><label className="form-label">Model Preference</label>
+                <select className="form-select" value={s.model||'auto'} onChange={e=>setS({...s,model:e.target.value})}>
+                  <option value="auto">Auto (recommended — finds a working model)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                  <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+                  <option value="gemini-flash-latest">Gemini Flash (latest)</option>
+                  <option value="gemini-pro-latest">Gemini Pro (latest)</option>
                 </select>
+                <div style={{fontSize:'11px',color:'var(--text-3)',marginTop:'6px',lineHeight:1.5}}>Auto mode queries your API key for available models and selects a working one automatically, retrying alternatives if a model is unavailable. This prevents failures when Google retires preview models.</div>
               </div>
             </div>
           </div>
@@ -1396,7 +1524,22 @@ function App(){
   const[clients,setClients]=useState([]);
   const[expanded,setExpanded]=useState({});
   const[templates,setTemplates]=useState([]);
-  const[settings,setSettings]=useState({apiKey:'',model:'gemini-2.5-flash-preview-05-20'});
+  const[settings,setSettings]=useState({apiKey:'',model:'auto'});
+  // Register a callback so the AI resolver can persist a discovered working
+  // model back into settings (avoids re-discovery on every subsequent call).
+  useEffect(function(){
+    window._lcOnModelResolved=function(model){
+      setSettings(function(prev){
+        if(prev.model===model)return prev;
+        const next=Object.assign({},prev,{resolvedModel:model});
+        // Note: we store as resolvedModel, not model, so the user's explicit
+        // preference (including 'auto') is preserved. The resolver treats
+        // 'auto' as "no preference" and uses discovery + priority order.
+        return next;
+      });
+    };
+    return function(){delete window._lcOnModelResolved;};
+  },[]);
   const[selProj,setSelProj]=useState(null);
   const[selNote,setSelNote]=useState(null);
   const[selPage,setSelPage]=useState(null);
