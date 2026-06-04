@@ -1226,7 +1226,17 @@ const SettingsModal=({settings,onSave,onClose,projects})=>{
               <button className="btn btn-ghost" style={{flex:1}} onClick={()=>jsonRef.current?.click()}><I name="Upload" size={13}/> Import JSON</button>
               <input ref={jsonRef} type="file" accept=".json" hidden onChange={e=>{
                 const f=e.target.files[0];if(!f)return;
-                const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!Array.isArray(d))throw new Error('Invalid format');localStorage.setItem('lc_import',JSON.stringify(d));alert('Import ready. Reload the page to apply.');onClose();}catch(err){alert('Import failed: '+err.message);}};r.readAsText(f);
+                const r=new FileReader();r.onload=async function(ev){
+                  try{
+                    const d=JSON.parse(ev.target.result);
+                    if(!Array.isArray(d))throw new Error('Invalid format: root must be an array');
+                    if(!d.length)throw new Error('File contains no projects');
+                    // Write directly to IndexedDB - bypasses localStorage quota entirely
+                    await Promise.all(d.map(function(p){return idb.putProject(p);}));
+                    alert('Import successful. The page will now reload.');
+                    window.location.reload();
+                  }catch(err){alert('Import failed: '+err.message);}
+                };r.readAsText(f);
               }}/>
             </div>
           </div>
@@ -1351,8 +1361,8 @@ function App(){
         let data=await idb.getAllProjects();
         if(!data.length&&migrated&&migrated.length)data=migrated;
         // Check for pending import
-        const imp=localStorage.getItem('lc_import');
-        if(imp){try{const d=JSON.parse(imp);if(Array.isArray(d)){data=d;await Promise.all(d.map(p=>idb.putProject(p)));localStorage.removeItem('lc_import');}}catch(e){}}
+        // lc_import localStorage staging removed - import now writes directly to IndexedDB
+        localStorage.removeItem('lc_import'); // clean up any stale staging data
         if(!data.length){data=INITIAL_DATA;await Promise.all(data.map(p=>idb.putProject(p)));}
         const cl=[...new Set(data.map(p=>p.client||'General'))];
         setClients(cl);
