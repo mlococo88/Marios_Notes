@@ -1358,9 +1358,402 @@ const AIPanel=({projects,selectedProjId,selectedNoteId,selectedPageId,settings,o
 };
 
 // ── Settings Modal ─────────────────────────────────────────────────────────
-const SettingsModal=({settings,onSave,onClose,projects})=>{
+// ── OneNote/Word .docx notebook importer ─────────────────────────────────────
+// OneNote exports an entire notebook as a single .docx where each page title is
+// rendered at 20pt (sz=40 half-points) and immediately followed by a weekday date
+// line. We parse word/document.xml directly to recover those page boundaries,
+// since the titles carry no semantic heading style (they use direct formatting).
+
+// Minimal in-browser unzip for a single stored/deflated entry from a .docx (ZIP).
+// Uses the native DecompressionStream API (available in modern Chrome).
+async function extractDocxEntry(arrayBuffer, entryName){
+  const dv=new DataView(arrayBuffer);
+  const bytes=new Uint8Array(arrayBuffer);
+  // Find End Of Central Directory record (signature 0x06054b50), scanning from end.
+  let eocd=-1;
+  for(let i=bytes.length-22;i>=0;i--){
+    if(dv.getUint32(i,true)===0x06054b50){eocd=i;break;}
+  }
+  if(eocd<0)throw new Error('Not a valid .docx (no ZIP directory found).');
+  const cdOffset=dv.getUint32(eocd+16,true);
+  const cdCount=dv.getUint16(eocd+10,true);
+  let p=cdOffset;
+  const dec=new TextDecoder('utf-8');
+  for(let c=0;c<cdCount;c++){
+    if(dv.getUint32(p,true)!==0x02014b50)break;
+    const method=dv.getUint16(p+10,true);
+    const compSize=dv.getUint32(p+20,true);
+    const nameLen=dv.getUint16(p+28,true);
+    const extraLen=dv.getUint16(p+30,true);
+    const commentLen=dv.getUint16(p+32,true);
+    const localOffset=dv.getUint32(p+42,true);
+    const name=dec.decode(bytes.subarray(p+46,p+46+nameLen));
+    if(name===entryName){
+      // Read local header to find actual data start.
+      const lNameLen=dv.getUint16(localOffset+26,true);
+      const lExtraLen=dv.getUint16(localOffset+28,true);
+      const dataStart=localOffset+30+lNameLen+lExtraLen;
+      const comp=bytes.subarray(dataStart,dataStart+compSize);
+      if(method===0){ // stored
+        return dec.decode(comp);
+      } else if(method===8){ // deflate
+        const ds=new DecompressionStream('deflate-raw');
+        const stream=new Blob([comp]).stream().pipeThrough(ds);
+        const buf=await new Response(stream).arrayBuffer();
+        return dec.decode(new Uint8Array(buf));
+      } else {
+        throw new Error('Unsupported ZIP compression method: '+method);
+      }
+    }
+    p+=46+nameLen+extraLen+commentLen;
+  }
+  throw new Error('Entry not found in .docx: '+entryName);
+}
+
+function _docxParaText(p){
+  const runs=p.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)||[];
+  let t=runs.map(function(r){return r.replace(/<[^>]+>/g,'');}).join('');
+  // unescape XML entities
+  t=t.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#x27;/g,"'").replace(/&#xa;/g,' ').replace(/&apos;/g,"'");
+  return t.trim();
+}
+function _docxMaxSize(p){
+  const m=p.match(/<w:sz w:val="(\d+)"/g)||[];
+  let mx=0;
+  m.forEach(function(s){const v=parseInt(s.replace(/\D/g,''),10);if(v>mx)mx=v;});
+  return mx||null;
+}
+function _docxRunsHtml(p){
+  const runs=p.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g)||[];
+  let out='';
+  runs.forEach(function(r){
+    const tm=r.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)||[];
+    let txt=tm.map(function(x){return x.replace(/<[^>]+>/g,'');}).join('');
+    if(!txt)return;
+    txt=txt.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#x27;/g,"'").replace(/&apos;/g,"'").replace(/&#xa;/g,' ');
+    // re-escape for safe HTML
+    txt=txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const bold=/<w:b\/>|<w:b /.test(r);
+    const ital=/<w:i\/>|<w:i /.test(r);
+    if(bold)txt='<strong>'+txt+'</strong>';
+    if(ital)txt='<em>'+txt+'</em>';
+    out+=txt;
+  });
+  return out;
+}
+
+var _DOCX_DATE_RE=/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\w+\s+\d{1,2},\s+\d{4}/i;
+
+// Parse the document XML into an array of {title, html} pages.
+function parseDocxNotebook(xml){
+  const bodyMatch=xml.match(/<w:body>([\s\S]*)<\/w:body>/);
+  const body=bodyMatch?bodyMatch[1]:xml;
+  const paras=body.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)||[];
+
+  function nextText(idx){
+    for(let j=idx+1;j<Math.min(idx+3,paras.length);j++){
+      const t=_docxParaText(paras[j]);
+      if(t)return t;
+    }
+    return '';
+  }
+  // Find page-break indices: 20pt paragraph followed by a weekday date line.
+  const breaks=[];
+  for(let i=0;i<paras.length;i++){
+    if(_docxMaxSize(paras[i])===40 && _DOCX_DATE_RE.test(nextText(i))){
+      breaks.push(i);
+    }
+  }
+  if(!breaks.length){
+    // Fallback: no detectable page titles - treat whole doc as one page.
+    let h='';
+    paras.forEach(function(p){
+      const seg=_docxRunsHtml(p);
+      if(seg.trim())h+='<p>'+seg+'</p>';
+    });
+    return [{title:'Imported Page',html:h}];
+  }
+  breaks.push(paras.length);
+  const pages=[];
+  for(let b=0;b<breaks.length-1;b++){
+    const start=breaks[b],end=breaks[b+1];
+    const title=_docxParaText(paras[start])||('Page '+(b+1));
+    let h='';
+    for(let k=start+1;k<end;k++){
+      const p=paras[k];
+      const seg=_docxRunsHtml(p);
+      if(!seg.trim())continue;
+      const sz=_docxMaxSize(p);
+      const isList=/<w:numPr>/.test(p);
+      if(isList){
+        h+='<li>'+seg+'</li>';
+      } else if(sz===36||sz===32){
+        h+='<h2>'+seg+'</h2>';
+      } else {
+        h+='<p>'+seg+'</p>';
+      }
+    }
+    // wrap consecutive <li> groups in <ul>
+    h=h.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g,function(m){return m;});
+    pages.push({title:title,html:h});
+  }
+  return pages;
+}
+
+// Parse a .docx as a single page. Uses the embedded 20pt title if present,
+// otherwise derives a title from the filename.
+function parseDocxSinglePage(xml, fallbackTitle){
+  const bodyMatch=xml.match(/<w:body>([\s\S]*)<\/w:body>/);
+  const body=bodyMatch?bodyMatch[1]:xml;
+  const paras=body.match(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)||[];
+  // Find a title: first 20pt paragraph that has text.
+  let titleIdx=-1,title='';
+  for(let i=0;i<paras.length;i++){
+    if(_docxMaxSize(paras[i])===40){
+      const t=_docxParaText(paras[i]);
+      if(t){titleIdx=i;title=t;break;}
+    }
+  }
+  if(!title)title=fallbackTitle||'Imported Page';
+  // Body = everything except the title paragraph itself.
+  let h='';
+  for(let k=0;k<paras.length;k++){
+    if(k===titleIdx)continue;
+    const p=paras[k];
+    const seg=_docxRunsHtml(p);
+    if(!seg.trim())continue;
+    const sz=_docxMaxSize(p);
+    const isList=/<w:numPr>/.test(p);
+    if(isList){h+='<li>'+seg+'</li>';}
+    else if(sz===36||sz===32){h+='<h2>'+seg+'</h2>';}
+    else{h+='<p>'+seg+'</p>';}
+  }
+  return {title:title,html:h};
+}
+
+// Top-level: read a .docx File, parse to pages, hand off to the create callback.
+async function readDocxSinglePage(file){
+  const buf=await file.arrayBuffer();
+  const xml=await extractDocxEntry(buf,'word/document.xml');
+  const fallback=file.name.replace(/\.docx$/i,'');
+  return parseDocxSinglePage(xml,fallback);
+}
+
+async function readDocxSection(file){
+  const buf=await file.arrayBuffer();
+  const xml=await extractDocxEntry(buf,'word/document.xml');
+  const pages=parseDocxNotebook(xml);
+  const sectionName=file.name.replace(/\.docx$/i,'');
+  return {sectionName:sectionName,pages:pages};
+}
+
+async function importDocxNotebook(file, onNotebookReady){
+  const buf=await file.arrayBuffer();
+  const xml=await extractDocxEntry(buf,'word/document.xml');
+  const pages=parseDocxNotebook(xml);
+  if(!pages.length)throw new Error('No pages could be parsed from this document.');
+  // Notebook name from filename (strip extension and leading codes).
+  let nbName=file.name.replace(/\.docx$/i,'');
+  onNotebookReady(nbName,pages);
+  return pages.length;
+}
+
+// ── Import Destination Dialog ────────────────────────────────────────────────
+// Two modes:
+//   'section' — importing a multi-page section; user picks the destination Project
+//   'page'    — importing a single page; user picks the destination Notebook Section
+//               and can edit the page title (defaulted to the embedded title).
+const ImportDestinationModal=({mode,payload,projects,onConfirm,onClose})=>{
+  // Build the flat list of sections across projects for the page-mode dropdown.
+  const sections=[];
+  projects.forEach(function(p){
+    (p.children||[]).forEach(function(n){
+      sections.push({projId:p.id,projTitle:p.title,nbId:n.id,nbTitle:n.title});
+    });
+  });
+
+  const[projChoice,setProjChoice]=useState(projects.length?projects[0].id:'__new__');
+  const[newProjName,setNewProjName]=useState('');
+  const[sectionChoice,setSectionChoice]=useState(sections.length?sections[0].nbId:'__new__');
+  const[newSectionName,setNewSectionName]=useState('');
+  // For new-section path in page mode, also need a project to host it.
+  const[newSectionProj,setNewSectionProj]=useState(projects.length?projects[0].id:'__new__');
+  const[pageTitle,setPageTitle]=useState(mode==='page'&&payload?(payload.title||''):'');
+  const[sectionName,setSectionName]=useState(mode==='section'&&payload?(payload.sectionName||''):'');
+
+  const titleText=mode==='section'?'Import Notebook Section':'Import Page';
+  const summary=mode==='section'
+    ? ('This file contains '+(payload?payload.pages.length:0)+' page'+((payload&&payload.pages.length===1)?'':'s')+'. Choose the project to create the new section under.')
+    : 'Choose the notebook section to add this page to, and confirm the page name.';
+
+  // Resolve a single page-title collision against an array of existing titles.
+  // Returns one of: {action:'replace',title} | {action:'add',title} | {action:'cancel'}
+  function resolvePageCollision(title, existingTitles){
+    let current=title;
+    // No collision - accept as-is.
+    if(existingTitles.indexOf(current)===-1)return {action:'add',title:current};
+    // Loop until resolved or cancelled.
+    while(true){
+      const replace=window.confirm('A page named "'+current+'" already exists in this section.\n\nClick OK to REPLACE the existing page, or Cancel to add as a NEW page with a different name.');
+      if(replace){
+        return {action:'replace',title:current};
+      }
+      const renamed=window.prompt('Enter a new name for the imported page:', current+' (imported)');
+      if(renamed===null)return {action:'cancel'};
+      current=renamed.trim();
+      if(!current){alert('Name cannot be empty.');continue;}
+      if(existingTitles.indexOf(current)===-1)return {action:'add',title:current};
+      // still collides - loop again
+    }
+  }
+
+  const confirm=()=>{
+    if(mode==='section'){
+      let projId=projChoice;
+      let createProj=null;
+      if(projChoice==='__new__'){
+        if(!newProjName.trim()){alert('Enter a name for the new project.');return;}
+        createProj=newProjName.trim();
+      }
+      const finalSection=(sectionName.trim())||(payload?payload.sectionName:'Imported Section')||'Imported Section';
+      // Section-name collision check (only when importing into an existing project).
+      let mergeIntoNbId=null;
+      if(!createProj){
+        const targetProj=projects.find(function(p){return p.id===projId;});
+        const existingNb=targetProj&&(targetProj.children||[]).find(function(n){return n.title===finalSection;});
+        if(existingNb){
+          const merge=window.confirm('A section named "'+finalSection+'" already exists in this project.\n\nClick OK to MERGE the imported pages into that existing section, or Cancel to stop and choose a different name.');
+          if(!merge)return; // user cancels to rename
+          mergeIntoNbId=existingNb.id;
+        }
+      }
+      // If merging, resolve per-page collisions against the existing section's pages.
+      let resolvedPages=payload.pages.map(function(pg){return {title:pg.title,html:pg.html,_action:'add'};});
+      if(mergeIntoNbId){
+        const targetProj=projects.find(function(p){return p.id===projId;});
+        const existingNb=targetProj.children.find(function(n){return n.id===mergeIntoNbId;});
+        const existingTitles=(existingNb.children||[]).map(function(x){return x.title;});
+        const runningTitles=existingTitles.slice();
+        for(let i=0;i<resolvedPages.length;i++){
+          const r=resolvePageCollision(resolvedPages[i].title, runningTitles);
+          if(r.action==='cancel')return; // abort whole import
+          resolvedPages[i].title=r.title;
+          resolvedPages[i]._action=r.action;
+          // A replaced page keeps the same title; an added page introduces a new title.
+          if(runningTitles.indexOf(r.title)===-1)runningTitles.push(r.title);
+        }
+      }
+      onConfirm({mode:'section',projId:projId,createProjName:createProj,sectionName:finalSection,
+        mergeIntoNbId:mergeIntoNbId,pages:resolvedPages});
+    } else {
+      // page mode
+      if(!pageTitle.trim()){alert('Enter a page title.');return;}
+      if(sectionChoice==='__new__'){
+        if(!newSectionName.trim()){alert('Enter a name for the new section.');return;}
+        let hostProj=newSectionProj;
+        let createProj=null;
+        if(newSectionProj==='__new__'){
+          if(!newProjName.trim()){alert('Enter a name for the new project to hold the section.');return;}
+          createProj=newProjName.trim();
+        }
+        // New section can't have collisions - it's empty.
+        onConfirm({mode:'page',createSectionName:newSectionName.trim(),hostProjId:hostProj,createProjName:createProj,
+          page:{title:pageTitle.trim(),html:payload.html,_action:'add'}});
+      } else {
+        const sec=sections.find(function(x){return x.nbId===sectionChoice;});
+        // Check for a page-title collision in the chosen existing section.
+        const targetProj=projects.find(function(p){return p.id===(sec?sec.projId:null);});
+        const targetNb=targetProj&&(targetProj.children||[]).find(function(n){return n.id===sectionChoice;});
+        const existingTitles=targetNb?(targetNb.children||[]).map(function(x){return x.title;}):[];
+        const r=resolvePageCollision(pageTitle.trim(), existingTitles);
+        if(r.action==='cancel')return;
+        onConfirm({mode:'page',nbId:sectionChoice,projId:sec?sec.projId:null,
+          page:{title:r.title,html:payload.html,_action:r.action}});
+      }
+    }
+  };
+
+  const labelStyle={fontSize:'12px',fontWeight:600,color:'var(--text-2)',display:'block',marginBottom:'6px'};
+  const groupStyle={marginBottom:'16px'};
+
+  return(
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{width:'480px'}} onClick={function(e){e.stopPropagation();}}>
+        <div className="modal-header"><span className="modal-title">{titleText}</span><button className="rail-btn" onClick={onClose}><I name="X" size={14}/></button></div>
+        <div className="modal-body">
+          <div style={{fontSize:'12px',color:'var(--text-3)',lineHeight:1.5,marginBottom:'18px'}}>{summary}</div>
+
+          {mode==='section'&&(
+            <div>
+              <div style={groupStyle}>
+                <label style={labelStyle}>Section name</label>
+                <input className="form-input" value={sectionName} onChange={function(e){setSectionName(e.target.value);}} placeholder="Notebook section name"/>
+              </div>
+              <div style={groupStyle}>
+                <label style={labelStyle}>Destination project</label>
+                <select className="form-select" value={projChoice} onChange={function(e){setProjChoice(e.target.value);}}>
+                  {projects.map(function(p){return <option key={p.id} value={p.id}>{p.title}</option>;})}
+                  <option value="__new__">+ Create new project...</option>
+                </select>
+              </div>
+              {projChoice==='__new__'&&(
+                <div style={groupStyle}>
+                  <label style={labelStyle}>New project name</label>
+                  <input className="form-input" value={newProjName} onChange={function(e){setNewProjName(e.target.value);}} placeholder="New project name"/>
+                </div>
+              )}
+            </div>
+          )}
+
+          {mode==='page'&&(
+            <div>
+              <div style={groupStyle}>
+                <label style={labelStyle}>Page title</label>
+                <input className="form-input" value={pageTitle} onChange={function(e){setPageTitle(e.target.value);}} placeholder="Page title"/>
+              </div>
+              <div style={groupStyle}>
+                <label style={labelStyle}>Destination notebook section</label>
+                <select className="form-select" value={sectionChoice} onChange={function(e){setSectionChoice(e.target.value);}}>
+                  {sections.map(function(x){return <option key={x.nbId} value={x.nbId}>{x.projTitle} / {x.nbTitle}</option>;})}
+                  <option value="__new__">+ Create new section...</option>
+                </select>
+              </div>
+              {sectionChoice==='__new__'&&(
+                <div>
+                  <div style={groupStyle}>
+                    <label style={labelStyle}>New section name</label>
+                    <input className="form-input" value={newSectionName} onChange={function(e){setNewSectionName(e.target.value);}} placeholder="New section name"/>
+                  </div>
+                  <div style={groupStyle}>
+                    <label style={labelStyle}>Place new section under project</label>
+                    <select className="form-select" value={newSectionProj} onChange={function(e){setNewSectionProj(e.target.value);}}>
+                      {projects.map(function(p){return <option key={p.id} value={p.id}>{p.title}</option>;})}
+                      <option value="__new__">+ Create new project...</option>
+                    </select>
+                  </div>
+                  {newSectionProj==='__new__'&&(
+                    <div style={groupStyle}>
+                      <label style={labelStyle}>New project name</label>
+                      <input className="form-input" value={newProjName} onChange={function(e){setNewProjName(e.target.value);}} placeholder="New project name"/>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="modal-footer" style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={confirm}>Import</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SettingsModal=({settings,onSave,onClose,projects,onStageImport})=>{
   const[s,setS]=useState(settings);
-  const docxRef=useRef(null);const jsonRef=useRef(null);
+  const sectionRef=useRef(null);const pageRef=useRef(null);const jsonRef=useRef(null);
   const exportJson=()=>{
     const blob=new Blob([JSON.stringify(projects,null,2)],{type:'application/json'});
     const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='loconotes_backup_'+Date.now()+'.json';a.click();URL.revokeObjectURL(url);
@@ -1388,11 +1781,26 @@ const SettingsModal=({settings,onSave,onClose,projects})=>{
             </div>
           </div>
           <div>
-            <div style={{fontSize:'11px',fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'12px',paddingBottom:'8px',borderBottom:'1px solid var(--border)'}}>Import</div>
-            <button className="btn btn-ghost" onClick={()=>docxRef.current?.click()}><I name="Upload" size={13}/> Import Word / OneNote (.docx)</button>
-            <input ref={docxRef} type="file" accept=".docx" hidden onChange={e=>{
-              const f=e.target.files[0];if(!f||typeof mammoth==='undefined')return;
-              f.arrayBuffer().then(buf=>mammoth.convertToHtml({arrayBuffer:buf})).then(r=>alert('Imported! HTML content is ready. Paste into a new page.')).catch(console.error);
+            <div style={{fontSize:'11px',fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'12px',paddingBottom:'8px',borderBottom:'1px solid var(--border)'}}>Import from OneNote</div>
+            <div style={{display:'flex',gap:'8px'}}>
+              <button className="btn btn-ghost" style={{flex:1}} onClick={()=>sectionRef.current?.click()}><I name="Upload" size={13}/> Notebook Section</button>
+              <button className="btn btn-ghost" style={{flex:1}} onClick={()=>pageRef.current?.click()}><I name="Upload" size={13}/> Single Page</button>
+            </div>
+            <div style={{fontSize:'11px',color:'var(--text-3)',marginTop:'6px',lineHeight:1.5}}>In OneNote: File &gt; Export. Choose Section to import all its pages as a new notebook section, or export a single page. You will choose the destination next.</div>
+            <input ref={sectionRef} type="file" accept=".docx" hidden onChange={function(e){
+              const f=e.target.files[0];if(!f)return;
+              readDocxSection(f).then(function(res){
+                if(!res.pages||!res.pages.length){alert('No pages could be parsed from this file.');return;}
+                onStageImport({mode:'section',payload:res});
+              }).catch(function(err){alert('Could not read file: '+err.message);});
+              e.target.value='';
+            }}/>
+            <input ref={pageRef} type="file" accept=".docx" hidden onChange={function(e){
+              const f=e.target.files[0];if(!f)return;
+              readDocxSinglePage(f).then(function(pg){
+                onStageImport({mode:'page',payload:pg});
+              }).catch(function(err){alert('Could not read file: '+err.message);});
+              e.target.value='';
             }}/>
           </div>
           <div>
@@ -1807,6 +2215,109 @@ function App(){
 
   // Add
   const addProject=()=>{const id='proj_'+Date.now();setProjects(prev=>[...prev,{id,type:'project',client:clients[0]||'General',title:'New Project',children:[],events:[],metadata:{}}]);setSelProj(id);setSelNote(null);setSelPage(null);setTimeout(()=>{setEditingId(id);setEditVal('New Project');},80);};
+  // Create a new notebook from imported OneNote pages in the selected project.
+  // Staged import payload drives the destination dialog (null when closed).
+  const[importStage,setImportStage]=useState(null);
+  const handleStageImport=(stage)=>{setImportStage(stage);setModal(null);};
+
+  // Confirm handler: create section or page at the chosen destination,
+  // creating a new project or section inline when requested.
+  const handleImportConfirm=(result)=>{
+    const ts=Date.now();
+    function makePage(pg,i){
+      return {id:'pg_'+ts+'_'+i,type:'page',title:pg.title||('Page '+(i+1)),
+        content:pg.html||'',createdAt:ts,level:0,pageSize:'Letter',pageBackground:'None'};
+    }
+    // Merge a list of resolved import pages into an existing children array.
+    // 'replace' pages overwrite the existing page of the same title (preserving its id);
+    // 'add' pages are appended.
+    function mergePages(existing,incoming){
+      let out=existing.slice();
+      incoming.forEach(function(pg,i){
+        if(pg._action==='replace'){
+          const idx=out.findIndex(function(x){return x.title===pg.title;});
+          if(idx!==-1){
+            out[idx]=Object.assign({},out[idx],{content:pg.html||'',createdAt:ts});
+            return;
+          }
+        }
+        out=out.concat([makePage(pg,i)]);
+      });
+      return out;
+    }
+
+    if(result.mode==='section'){
+      if(result.mergeIntoNbId){
+        // Merge resolved pages into the existing section.
+        updateTree(function(p){
+          if(p.id!==result.projId)return p;
+          return Object.assign({},p,{children:(p.children||[]).map(function(n){
+            if(n.id!==result.mergeIntoNbId)return n;
+            return Object.assign({},n,{children:mergePages(n.children||[],result.pages)});
+          })});
+        });
+        setSelProj(result.projId);
+        setSelNote(result.mergeIntoNbId);
+      } else {
+        // Create a fresh section.
+        const nbId='nb_'+ts;
+        const newNb={id:nbId,type:'notebook',title:result.sectionName||'Imported Section',
+          children:result.pages.map(makePage)};
+        if(result.createProjName){
+          const projId='proj_'+ts;
+          const newProj={id:projId,type:'project',title:result.createProjName,client:'General',metadata:{},events:[],children:[newNb]};
+          setProjects(function(prev){return prev.concat([newProj]);});
+          setSelProj(projId);
+        } else {
+          updateTree(function(p){
+            return p.id===result.projId?Object.assign({},p,{children:(p.children||[]).concat([newNb])}):p;
+          });
+          setSelProj(result.projId);
+        }
+        setSelNote(nbId);
+        const firstPg=newNb.children[0];
+        if(firstPg)setSelPage(firstPg.id);
+      }
+    } else {
+      // page mode
+      if(result.createSectionName){
+        const nbId='nb_'+ts;
+        const newNb={id:nbId,type:'notebook',title:result.createSectionName,children:[makePage(result.page,0)]};
+        if(result.createProjName){
+          const projId='proj_'+ts;
+          const newProj={id:projId,type:'project',title:result.createProjName,client:'General',metadata:{},events:[],children:[newNb]};
+          setProjects(function(prev){return prev.concat([newProj]);});
+          setSelProj(projId);
+        } else {
+          updateTree(function(p){
+            return p.id===result.hostProjId?Object.assign({},p,{children:(p.children||[]).concat([newNb])}):p;
+          });
+          setSelProj(result.hostProjId);
+        }
+        setSelNote(nbId);
+        setSelPage(newNb.children[0].id);
+      } else {
+        // append or replace within existing section
+        let selectedPageId=null;
+        updateTree(function(p){
+          if(p.id!==result.projId)return p;
+          return Object.assign({},p,{children:(p.children||[]).map(function(n){
+            if(n.id!==result.nbId)return n;
+            const merged=mergePages(n.children||[],[result.page]);
+            // Determine which page to select after merge.
+            const match=merged.find(function(x){return x.title===result.page.title;});
+            if(match)selectedPageId=match.id;
+            return Object.assign({},n,{children:merged});
+          })});
+        });
+        if(result.projId)setSelProj(result.projId);
+        setSelNote(result.nbId);
+        if(selectedPageId)setSelPage(selectedPageId);
+      }
+    }
+    setImportStage(null);
+  };
+
   const addNotebook=()=>{if(!activeProject)return;const id='nb_'+Date.now();updateTree(p=>p.id===selProj?{...p,children:[...p.children,{id,type:'notebook',title:'New Notebook',children:[]}]}:p);setSelNote(id);setTimeout(()=>{setEditingId(id);setEditVal('New Notebook');},80);};
   const addPage=()=>{if(!activeNotebook)return;const id='pg_'+Date.now();updateTree(p=>({...p,children:p.children?.map(n=>n.id===selNote?{...n,children:[...n.children,{id,type:'page',title:'New Page',content:'',createdAt:Date.now(),level:0}]}:n)}));setSelPage(id);setMobileView('editor');setTimeout(()=>{setEditingId(id);setEditVal('New Page');},80);};
   const addClient=()=>{const name=prompt('New client group name:');if(name&&!clients.includes(name)){const nc=[...clients,name];setClients(nc);setExpanded(prev=>({...prev,[name]:true}));}};
@@ -2099,7 +2610,8 @@ function App(){
 
       {/* Modals */}
       {modal==='search'&&<SearchOverlay projects={projects} onClose={()=>setModal(null)} onSelect={function(r){setSelProj(r.projId);setSelNote(r.notebookId);setSelPage(r.id);setActivePane('primary');setMobileView('editor');setModal(null);}}/>}
-      {modal==='settings'&&<SettingsModal settings={settings} projects={projects} onClose={()=>setModal(null)} onSave={s=>{setSettings(s);idb.putSetting('appSettings',s);try{localStorage.setItem('neuronote_settings',JSON.stringify(s));}catch(e){}}}/>}
+      {modal==='settings'&&<SettingsModal settings={settings} projects={projects} onStageImport={handleStageImport} onClose={()=>setModal(null)} onSave={s=>{setSettings(s);idb.putSetting('appSettings',s);try{localStorage.setItem('neuronote_settings',JSON.stringify(s));}catch(e){}}}/>}
+      {importStage&&<ImportDestinationModal mode={importStage.mode} payload={importStage.payload} projects={projects} onConfirm={handleImportConfirm} onClose={()=>setImportStage(null)}/>}
       {modal==='diag'&&<DiagnosticsModal projects={projects} syncStatus={syncStatus} onClose={()=>setModal(null)} selProj={selProj} selNote={selNote} selPage={selPage}/>}
       {modal==='templates'&&<TemplateModal templates={templates} onLoad={loadTemplate} onDelete={delTemplate} onClose={()=>setModal(null)}/>}
     </div>
