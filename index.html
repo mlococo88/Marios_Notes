@@ -37,12 +37,38 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['IBM Plex Sans','system-ui','s
 html,body,#root{height:100%;margin:0;padding:0;overflow:hidden}
 body{font-family:'IBM Plex Sans',system-ui,sans-serif;-webkit-font-smoothing:antialiased;background:#0f1117;color:#e2e8f0;overscroll-behavior:none}
 :root{
-  --rail-w:52px;--panel-bg:#0f1117;--sidebar-bg:#161b27;--surface:#1e2535;--surface-2:#252d40;
-  --border:rgba(255,255,255,0.07);--border-2:rgba(255,255,255,0.12);
-  --text-1:#f1f5f9;--text-2:#94a3b8;--text-3:#64748b;
+  --rail-w:52px;
   --accent:#2563eb;--accent-2:#3b82f6;--accent-glow:rgba(37,99,235,0.15);
   --success:#10b981;--warn:#f59e0b;--danger:#ef4444;
-  --page-bg:#ffffff;--page-shadow:0 4px 32px rgba(0,0,0,0.4),0 1px 4px rgba(0,0,0,0.3)
+  /* The document "paper" stays light across themes so notes read like print. */
+  --page-bg:#ffffff;
+}
+/* ── Dark (original) ───────────────────────────────────────────── */
+:root,:root[data-theme="dark"]{
+  --panel-bg:#0f1117;--sidebar-bg:#161b27;--surface:#1e2535;--surface-2:#252d40;
+  --border:rgba(255,255,255,0.07);--border-2:rgba(255,255,255,0.12);
+  --hover:rgba(255,255,255,0.06);
+  --text-1:#f1f5f9;--text-2:#94a3b8;--text-3:#64748b;
+  --canvas-bg:#d1d5db;
+  --page-shadow:0 4px 32px rgba(0,0,0,0.4),0 1px 4px rgba(0,0,0,0.3);
+}
+/* ── Dim (softer slate, less harsh contrast) ──────────────────── */
+:root[data-theme="dim"]{
+  --panel-bg:#1c2230;--sidebar-bg:#222a3a;--surface:#2b3446;--surface-2:#354056;
+  --border:rgba(255,255,255,0.09);--border-2:rgba(255,255,255,0.16);
+  --hover:rgba(255,255,255,0.07);
+  --text-1:#f3f6fb;--text-2:#aab6c8;--text-3:#7e8ba1;
+  --canvas-bg:#aeb6c4;
+  --page-shadow:0 4px 28px rgba(0,0,0,0.3),0 1px 4px rgba(0,0,0,0.2);
+}
+/* ── Light ─────────────────────────────────────────────────────── */
+:root[data-theme="light"]{
+  --panel-bg:#f1f3f7;--sidebar-bg:#e8ebf1;--surface:#dde2ea;--surface-2:#cfd6e1;
+  --border:rgba(15,23,42,0.10);--border-2:rgba(15,23,42,0.18);
+  --hover:rgba(15,23,42,0.05);
+  --text-1:#1e293b;--text-2:#475569;--text-3:#64748b;
+  --canvas-bg:#c4cbd6;
+  --page-shadow:0 4px 24px rgba(15,23,42,0.12),0 1px 4px rgba(15,23,42,0.08);
 }
 .scr::-webkit-scrollbar{width:4px;height:4px}
 .scr::-webkit-scrollbar-track{background:transparent}
@@ -81,7 +107,7 @@ body{font-family:'IBM Plex Sans',system-ui,sans-serif;-webkit-font-smoothing:ant
 .resizer{position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:20;display:flex;align-items:center;justify-content:center}
 .resizer::after{content:'';display:block;width:2px;height:32px;background:var(--border-2);border-radius:1px;transition:all 0.15s}
 .resizer:hover::after,.resizer.dragging::after{background:var(--accent);height:48px}
-.editor-canvas{background:#d1d5db;padding:24px;overflow-y:auto;flex:1}
+.editor-canvas{background:var(--canvas-bg);padding:24px;overflow-y:auto;flex:1}
 .page-sheet{background:var(--page-bg);box-shadow:var(--page-shadow);margin:0 auto;padding:72px 80px;min-height:11in;width:8.5in;position:relative;border-radius:2px}
 .page-title-input{width:100%;font-family:'IBM Plex Sans',sans-serif;font-size:28px;font-weight:600;color:#0f172a;border:none;outline:none;background:transparent;padding:0;margin:0 0 6px 0;line-height:1.2}
 .page-meta{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#94a3b8;margin-bottom:24px;display:flex;gap:16px;flex-wrap:wrap}
@@ -1809,6 +1835,17 @@ const SettingsModal=({settings,onSave,onClose,projects,onStageImport})=>{
         <div className="modal-header"><span className="modal-title">Settings</span><button className="rail-btn" onClick={onClose}><I name="X" size={14}/></button></div>
         <div className="modal-body scr" style={{display:'flex',flexDirection:'column',gap:'20px',maxHeight:'70vh',overflowY:'auto'}}>
           <div>
+            <div style={{fontSize:'11px',fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'12px',paddingBottom:'8px',borderBottom:'1px solid var(--border)'}}>Appearance</div>
+            <div><label className="form-label">Theme</label>
+              <select className="form-select" value={s.theme||'dark'} onChange={e=>setS({...s,theme:e.target.value})}>
+                <option value="dark">Dark (default)</option>
+                <option value="dim">Dim (softer contrast)</option>
+                <option value="light">Light</option>
+              </select>
+              <div style={{fontSize:'11px',color:'var(--text-3)',marginTop:'6px',lineHeight:1.5}}>Changes the app interface. The note page itself stays light like paper for readability. Applies immediately on save.</div>
+            </div>
+          </div>
+          <div>
             <div style={{fontSize:'11px',fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'12px',paddingBottom:'8px',borderBottom:'1px solid var(--border)'}}>AI Configuration</div>
             <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
               <div><label className="form-label">Gemini API Key</label><input type="password" className="form-input" value={s.apiKey||''} onChange={e=>setS({...s,apiKey:e.target.value})} placeholder="AIza..."/></div>
@@ -1977,7 +2014,12 @@ function App(){
   const[clients,setClients]=useState([]);
   const[expanded,setExpanded]=useState({});
   const[templates,setTemplates]=useState([]);
-  const[settings,setSettings]=useState({apiKey:'',model:'auto'});
+  const[settings,setSettings]=useState({apiKey:'',model:'auto',theme:'dark'});
+  // Apply the selected theme to the document root so the CSS variable sets switch.
+  useEffect(function(){
+    const t=(settings&&settings.theme)||'dark';
+    document.documentElement.setAttribute('data-theme',t);
+  },[settings&&settings.theme]);
   // Register a callback so the AI resolver can persist a discovered working
   // model back into settings (avoids re-discovery on every subsequent call).
   useEffect(function(){
