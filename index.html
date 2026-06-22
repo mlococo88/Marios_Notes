@@ -73,6 +73,11 @@ body{font-family:'IBM Plex Sans',system-ui,sans-serif;-webkit-font-smoothing:ant
 .client-group-header{display:flex;align-items:center;gap:6px;padding:8px 8px 4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-3);cursor:pointer;user-select:none;margin-top:8px}
 .client-group-header:first-child{margin-top:0}
 .client-group-header:hover{color:var(--text-2)}
+.cg-actions{display:none;align-items:center;gap:1px;margin-left:auto;flex-shrink:0}
+.client-group-header:hover .cg-actions{display:flex}
+.cg-act-btn{background:none;border:none;color:var(--text-3);cursor:pointer;padding:2px;border-radius:3px;display:flex;align-items:center;justify-content:center}
+.cg-act-btn:hover{background:var(--hover);color:var(--text-1)}
+.cg-act-btn.cg-del:hover{color:#ef4444}
 .resizer{position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:20;display:flex;align-items:center;justify-content:center}
 .resizer::after{content:'';display:block;width:2px;height:32px;background:var(--border-2);border-radius:1px;transition:all 0.15s}
 .resizer:hover::after,.resizer.dragging::after{background:var(--accent);height:48px}
@@ -1986,7 +1991,22 @@ function App(){
         // lc_import localStorage staging removed - import now writes directly to IndexedDB
         localStorage.removeItem('lc_import'); // clean up any stale staging data
         if(!data.length){data=INITIAL_DATA;await Promise.all(data.map(p=>idb.putProject(p)));}
-        const cl=[...new Set(data.map(p=>p.client||'General'))];
+        const discovered=[...new Set(data.map(p=>p.client||'General'))];
+        // Merge with any persisted client-group order (preserves manual ordering
+        // and keeps empty groups the user created that have no projects yet).
+        let stored=null;
+        try{const so=await idb.getSetting('clientOrder');if(so&&Array.isArray(so.value))stored=so.value;}catch(e){}
+        let cl;
+        if(stored){
+          // Keep stored order, drop stored names that have neither projects nor
+          // intentional existence, then append any newly discovered names.
+          cl=stored.slice();
+          discovered.forEach(function(c){if(cl.indexOf(c)===-1)cl.push(c);});
+        } else {
+          cl=discovered;
+        }
+        // Guarantee 'General' always exists as a home for unassigned projects.
+        if(cl.indexOf('General')===-1)cl.unshift('General');
         setClients(cl);
         const exp={};cl.forEach(c=>exp[c]=true);setExpanded(exp);
         // Migrate eng blocks from localStorage into page records (one-time)
@@ -2214,7 +2234,15 @@ function App(){
   const editKeyDown=(e,id,scope)=>{if(e.key==='Enter'){saveEdit(id,scope);}if(e.key==='Escape')setEditingId(null);};
 
   // Add
-  const addProject=()=>{const id='proj_'+Date.now();setProjects(prev=>[...prev,{id,type:'project',client:clients[0]||'General',title:'New Project',children:[],events:[],metadata:{}}]);setSelProj(id);setSelNote(null);setSelPage(null);setTimeout(()=>{setEditingId(id);setEditVal('New Project');},80);};
+  const addProject=(clientGroup)=>{
+    const id='proj_'+Date.now();
+    const grp=(typeof clientGroup==='string'&&clientGroup)?clientGroup:(clients[0]||'General');
+    setProjects(prev=>[...prev,{id,type:'project',client:grp,title:'New Project',children:[],events:[],metadata:{}}]);
+    // Make sure the destination group is expanded so the new project is visible.
+    setExpanded(prev=>Object.assign({},prev,{[grp]:true}));
+    setSelProj(id);setSelNote(null);setSelPage(null);
+    setTimeout(()=>{setEditingId(id);setEditVal('New Project');},80);
+  };
   // Create a new notebook from imported OneNote pages in the selected project.
   // Staged import payload drives the destination dialog (null when closed).
   const[importStage,setImportStage]=useState(null);
@@ -2320,7 +2348,49 @@ function App(){
 
   const addNotebook=()=>{if(!activeProject)return;const id='nb_'+Date.now();updateTree(p=>p.id===selProj?{...p,children:[...p.children,{id,type:'notebook',title:'New Notebook',children:[]}]}:p);setSelNote(id);setTimeout(()=>{setEditingId(id);setEditVal('New Notebook');},80);};
   const addPage=()=>{if(!activeNotebook)return;const id='pg_'+Date.now();updateTree(p=>({...p,children:p.children?.map(n=>n.id===selNote?{...n,children:[...n.children,{id,type:'page',title:'New Page',content:'',createdAt:Date.now(),level:0}]}:n)}));setSelPage(id);setMobileView('editor');setTimeout(()=>{setEditingId(id);setEditVal('New Page');},80);};
-  const addClient=()=>{const name=prompt('New client group name:');if(name&&!clients.includes(name)){const nc=[...clients,name];setClients(nc);setExpanded(prev=>({...prev,[name]:true}));}};
+  // Persist the client-group order so manual ordering and empty groups survive reloads.
+  const persistClientOrder=(arr)=>{try{idb.putSetting('clientOrder',arr);}catch(e){}};
+
+  const addClient=()=>{
+    const name=prompt('New client group name:');
+    if(!name)return;
+    const trimmed=name.trim();
+    if(!trimmed){alert('Name cannot be empty.');return;}
+    if(clients.includes(trimmed)){alert('A client group with that name already exists.');return;}
+    const nc=clients.concat([trimmed]);
+    setClients(nc);persistClientOrder(nc);
+    setExpanded(prev=>Object.assign({},prev,{[trimmed]:true}));
+  };
+
+  const deleteClient=(e,name)=>{
+    e.stopPropagation();
+    if(name==='General'){alert('The General group cannot be deleted; it is the default home for unassigned projects.');return;}
+    const inGroup=projects.filter(function(p){return (p.client||'General')===name;});
+    if(inGroup.length>0){
+      const ok=window.confirm('"'+name+'" contains '+inGroup.length+' project'+(inGroup.length===1?'':'s')+'.\n\nClick OK to move '+(inGroup.length===1?'it':'them')+' to the General group and delete this client group. Click Cancel to keep the group.');
+      if(!ok)return;
+      // Reassign those projects to General.
+      setProjects(function(prev){return prev.map(function(p){
+        return (p.client||'General')===name?Object.assign({},p,{client:'General'}):p;
+      });});
+    }
+    const nc=clients.filter(function(c){return c!==name;});
+    // Ensure General still present.
+    if(nc.indexOf('General')===-1)nc.unshift('General');
+    setClients(nc);persistClientOrder(nc);
+    setExpanded(function(prev){const n=Object.assign({},prev);delete n[name];return n;});
+  };
+
+  const moveClient=(e,name,dir)=>{
+    e.stopPropagation();
+    const idx=clients.indexOf(name);
+    if(idx===-1)return;
+    const swap=idx+dir;
+    if(swap<0||swap>=clients.length)return;
+    const nc=clients.slice();
+    const tmp=nc[idx];nc[idx]=nc[swap];nc[swap]=tmp;
+    setClients(nc);persistClientOrder(nc);
+  };
 
   // Delete
   const delProject=(e,id)=>{e.stopPropagation();if(confirm('Delete this project and all its contents?')){setProjects(prev=>prev.filter(p=>p.id!==id));if(selProj===id){setSelProj(null);setSelNote(null);setSelPage(null);}}};
@@ -2482,7 +2552,14 @@ function App(){
                 return(
                   <div key={client}>
                     <div className="client-group-header" onClick={()=>setExpanded(prev=>({...prev,[client]:!prev[client]}))}>
-                      <I name={expanded[client]?'ChevD':'ChevR'} size={11} style={{marginRight:'2px',flexShrink:0}}/>{client}
+                      <I name={expanded[client]?'ChevD':'ChevR'} size={11} style={{marginRight:'2px',flexShrink:0}}/>
+                      <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{client}</span>
+                      <span className="cg-actions">
+                        <button className="cg-act-btn" title="New project in this group" onClick={function(e){e.stopPropagation();addProject(client);}}><I name="Plus" size={11}/></button>
+                        <button className="cg-act-btn" title="Move up" onClick={function(e){moveClient(e,client,-1);}}><I name="ChevU" size={11}/></button>
+                        <button className="cg-act-btn" title="Move down" onClick={function(e){moveClient(e,client,1);}}><I name="ChevD" size={11}/></button>
+                        {client!=='General'&&<button className="cg-act-btn cg-del" title="Delete client group" onClick={function(e){deleteClient(e,client);}}><I name="Trash" size={11}/></button>}
+                      </span>
                     </div>
                     {expanded[client]&&cp.map(p=>(
                       <SidebarItem key={p.id} item={p} icon="🗂" isSelected={selProj===p.id} isEditing={editingId===p.id} editValue={editVal}
@@ -2493,7 +2570,7 @@ function App(){
                 );
               })}
               <div style={{padding:'6px 6px 0'}}>
-                <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'center'}} onClick={addProject}><I name="Plus" size={13}/> New Project</button>
+                <button className="btn btn-ghost btn-sm" style={{width:'100%',justifyContent:'center'}} onClick={function(){addProject();}}><I name="Plus" size={13}/> New Project</button>
               </div>
             </div>
             <div className="resizer" onMouseDown={e=>startPanelResize(e,'projects')}/>
@@ -2586,7 +2663,7 @@ function App(){
                   :<div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:'16px',color:'var(--text-3)',background:'var(--panel-bg)'}}>
                     <div style={{width:'52px',height:'52px',background:'var(--accent)',borderRadius:'14px',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'IBM Plex Mono',fontWeight:600,fontSize:'15px',color:'white',opacity:0.25}}>LC</div>
                     <span style={{fontSize:'13px'}}>Select a project to get started</span>
-                    <button className="btn btn-ghost btn-sm" onClick={addProject}><I name="Plus" size={13}/> New Project</button>
+                    <button className="btn btn-ghost btn-sm" onClick={function(){addProject();}}><I name="Plus" size={13}/> New Project</button>
                   </div>
               }
             </div>
