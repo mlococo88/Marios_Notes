@@ -272,6 +272,7 @@ const idb={
   },
   getAllProjects:()=>idb.tx('projects','readonly',s=>s.getAll()),
   putProject:(p)=>idb.tx('projects','readwrite',s=>s.put(p)),
+  deleteProject:(id)=>idb.tx('projects','readwrite',s=>s.delete(id)),
   getAllTemplates:()=>idb.tx('templates','readonly',s=>s.getAll()),
   putTemplate:(t)=>idb.tx('templates','readwrite',s=>s.put(t)),
   deleteTemplate:(id)=>idb.tx('templates','readwrite',s=>s.delete(id)),
@@ -1044,11 +1045,50 @@ const ProjectDashboard=({project,onUpdate})=>{
   );
 };
 
+// ── Project context menu (move to client group) ─────────────────────────────
+const ProjectContextMenu=({x,y,project,clients,onMove,onClose})=>{
+  useEffect(function(){
+    const close=function(){onClose();};
+    window.addEventListener('click',close);
+    window.addEventListener('contextmenu',close);
+    window.addEventListener('scroll',close,true);
+    return function(){
+      window.removeEventListener('click',close);
+      window.removeEventListener('contextmenu',close);
+      window.removeEventListener('scroll',close,true);
+    };
+  },[]);
+  const current=project.client||'General';
+  const targets=clients.filter(function(c){return c!==current;});
+  // Clamp position so the menu stays on screen.
+  const style={position:'fixed',top:Math.min(y,window.innerHeight-260)+'px',left:Math.min(x,window.innerWidth-220)+'px',
+    zIndex:10000,background:'var(--panel-bg)',border:'1px solid var(--border)',borderRadius:'8px',
+    boxShadow:'0 8px 28px rgba(0,0,0,0.4)',minWidth:'190px',padding:'6px',maxHeight:'260px',overflowY:'auto'};
+  return(
+    <div style={style} onClick={function(e){e.stopPropagation();}} onContextMenu={function(e){e.preventDefault();e.stopPropagation();}}>
+      <div style={{fontSize:'10px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text-3)',padding:'4px 8px 6px'}}>Move to client group</div>
+      {targets.length===0&&(
+        <div style={{fontSize:'12px',color:'var(--text-3)',padding:'6px 8px'}}>No other groups available.</div>
+      )}
+      {targets.map(function(c){
+        return(
+          <div key={c} onClick={function(){onMove(project.id,c);onClose();}}
+            style={{fontSize:'13px',color:'var(--text-1)',padding:'7px 8px',borderRadius:'5px',cursor:'pointer',display:'flex',alignItems:'center',gap:'8px'}}
+            onMouseEnter={function(e){e.currentTarget.style.background='var(--hover)';}}
+            onMouseLeave={function(e){e.currentTarget.style.background='transparent';}}>
+            <I name="Users" size={12}/>{c}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // ── Sidebar Item ───────────────────────────────────────────────────────────
-const SidebarItem=memo(({item,isSelected,isEditing,editValue,onSelect,onEditStart,onEditSave,onEditChange,onEditKeyDown,onDelete,onIndent,onOutdent,icon,depth=0})=>{
+const SidebarItem=memo(({item,isSelected,isEditing,editValue,onSelect,onEditStart,onEditSave,onEditChange,onEditKeyDown,onDelete,onIndent,onOutdent,onContextMenu,icon,depth=0})=>{
   const isPdf=item.mimeType==='application/pdf';
   return(
-    <div className={'si'+(isSelected?' active':'')} style={{paddingLeft:(depth*14+8)+'px'}} onClick={e=>onSelect(e,item.id)}>
+    <div className={'si'+(isSelected?' active':'')} style={{paddingLeft:(depth*14+8)+'px'}} onClick={e=>onSelect(e,item.id)} onContextMenu={onContextMenu?function(e){onContextMenu(e,item);}:undefined}>
       <span style={{fontSize:'13px',flexShrink:0,color:isPdf?'#ef4444':isSelected?'var(--accent-2)':'var(--text-3)'}}>{isPdf?'📄':icon}</span>
       <span className="si-label">
         {isEditing?(
@@ -2381,6 +2421,19 @@ function App(){
     setExpanded(function(prev){const n=Object.assign({},prev);delete n[name];return n;});
   };
 
+  // Right-click context menu for moving a project to a different client group.
+  const[ctxMenu,setCtxMenu]=useState(null); // {x,y,project} | null
+  const openProjectMenu=(e,project)=>{
+    e.preventDefault();e.stopPropagation();
+    setCtxMenu({x:e.clientX,y:e.clientY,project:project});
+  };
+  const moveProjectToClient=(projId,group)=>{
+    setProjects(function(prev){return prev.map(function(p){
+      return p.id===projId?Object.assign({},p,{client:group}):p;
+    });});
+    setExpanded(function(prev){return Object.assign({},prev,{[group]:true});});
+  };
+
   const moveClient=(e,name,dir)=>{
     e.stopPropagation();
     const idx=clients.indexOf(name);
@@ -2393,7 +2446,7 @@ function App(){
   };
 
   // Delete
-  const delProject=(e,id)=>{e.stopPropagation();if(confirm('Delete this project and all its contents?')){setProjects(prev=>prev.filter(p=>p.id!==id));if(selProj===id){setSelProj(null);setSelNote(null);setSelPage(null);}}};
+  const delProject=(e,id)=>{e.stopPropagation();if(confirm('Delete this project and all its contents?')){idb.deleteProject(id).catch(function(err){console.warn('deleteProject failed:',err);});setProjects(prev=>prev.filter(p=>p.id!==id));if(selProj===id){setSelProj(null);setSelNote(null);setSelPage(null);}}};
   const delNotebook=(e,id)=>{e.stopPropagation();if(confirm('Delete this notebook and all its pages?')){updateTree(p=>p.id===selProj?{...p,children:p.children.filter(n=>n.id!==id)}:p);if(selNote===id){setSelNote(null);setSelPage(null);}}};
   const delPage=(e,id)=>{e.stopPropagation();if(confirm('Delete this page?')){updateTree(p=>({...p,children:p.children?.map(n=>({...n,children:n.children?.filter(pg=>pg.id!==id)}))}));if(selPage===id)setSelPage(null);if(selPage2===id)setSelPage2(null);}};
 
@@ -2564,7 +2617,8 @@ function App(){
                     {expanded[client]&&cp.map(p=>(
                       <SidebarItem key={p.id} item={p} icon="🗂" isSelected={selProj===p.id} isEditing={editingId===p.id} editValue={editVal}
                         onEditChange={setEditVal} onSelect={(e,id)=>selectProject(id)} onEditStart={startEdit}
-                        onEditSave={id=>saveEdit(id,'project')} onEditKeyDown={(e,id)=>editKeyDown(e,id,'project')} onDelete={delProject}/>
+                        onEditSave={id=>saveEdit(id,'project')} onEditKeyDown={(e,id)=>editKeyDown(e,id,'project')} onDelete={delProject}
+                        onContextMenu={openProjectMenu}/>
                     ))}
                   </div>
                 );
@@ -2689,6 +2743,7 @@ function App(){
       {modal==='search'&&<SearchOverlay projects={projects} onClose={()=>setModal(null)} onSelect={function(r){setSelProj(r.projId);setSelNote(r.notebookId);setSelPage(r.id);setActivePane('primary');setMobileView('editor');setModal(null);}}/>}
       {modal==='settings'&&<SettingsModal settings={settings} projects={projects} onStageImport={handleStageImport} onClose={()=>setModal(null)} onSave={s=>{setSettings(s);idb.putSetting('appSettings',s);try{localStorage.setItem('neuronote_settings',JSON.stringify(s));}catch(e){}}}/>}
       {importStage&&<ImportDestinationModal mode={importStage.mode} payload={importStage.payload} projects={projects} onConfirm={handleImportConfirm} onClose={()=>setImportStage(null)}/>}
+      {ctxMenu&&<ProjectContextMenu x={ctxMenu.x} y={ctxMenu.y} project={ctxMenu.project} clients={clients} onMove={moveProjectToClient} onClose={()=>setCtxMenu(null)}/>}
       {modal==='diag'&&<DiagnosticsModal projects={projects} syncStatus={syncStatus} onClose={()=>setModal(null)} selProj={selProj} selNote={selNote} selPage={selPage}/>}
       {modal==='templates'&&<TemplateModal templates={templates} onLoad={loadTemplate} onDelete={delTemplate} onClose={()=>setModal(null)}/>}
     </div>
