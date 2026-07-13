@@ -258,7 +258,7 @@ canvas.pdf-page{box-shadow:0 4px 16px rgba(0,0,0,0.15);margin-bottom:16px;displa
 <body>
 <div id="root"></div>
 <script type="text/babel">
-console.log("[LoCoNotes] build 2026-07-13.4");
+console.log("[LoCoNotes] build 2026-07-13.6");
 const {useState,useEffect,useMemo,useRef,useCallback,memo,createContext,useContext}=React;
 const APP_VER='2.0.0';
 const DB_NAME='LoCoNotesV2';
@@ -893,33 +893,87 @@ const EngBlocksSection=({blocks,onChange})=>{
 
 // ── PDF Viewer ─────────────────────────────────────────────────────────────
 const PdfViewer=memo(({pageData})=>{
-  const cvRef=useRef(null);const[doc,setDoc]=useState(null);const[page,setPage]=useState(1);const[scale,setScale]=useState(1.3);
+  // Continuous-scroll viewer: renders EVERY page stacked vertically, the way
+  // engineers actually review drawing sets. The old single-canvas + Prev/Next
+  // model read as "only shows the first page" — scrolling did nothing.
+  const[doc,setDoc]=useState(null);
+  const[scale,setScale]=useState(1.3);
+  const[renderedUpTo,setRenderedUpTo]=useState(0);
+  const containerRef=useRef(null);
+  const genRef=useRef(0); // invalidates in-flight renders when doc/scale changes
+
   useEffect(()=>{
     if(!pageData?.pdfData||typeof pdfjsLib==='undefined')return;
+    let cancelled=false;
+    // Decode base64 → Uint8Array (typed array is pdf.js's preferred input).
+    function toBytes(dataUrl){
+      const b64=(dataUrl.split(',')[1])||'';
+      const bin=atob(b64);
+      const bytes=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+      return bytes;
+    }
     try{
-      pdfjsLib.getDocument({data:atob(pageData.pdfData.split(',')[1]||'')}).promise
-        .then(function(d){setDoc(d);setPage(1);})
+      pdfjsLib.getDocument({data:toBytes(pageData.pdfData)}).promise
+        .then(function(d){if(!cancelled)setDoc(d);})
         .catch(function(e){console.warn('PDF load error:',e);});
     }catch(e){
-      // Fallback: try passing data URL directly
       pdfjsLib.getDocument(pageData.pdfData).promise
-        .then(function(d){setDoc(d);setPage(1);})
+        .then(function(d){if(!cancelled)setDoc(d);})
         .catch(function(e2){console.warn('PDF fallback error:',e2);});
     }
+    return function(){cancelled=true;};
   },[pageData]);
-  useEffect(()=>{if(!doc||!cvRef.current)return;doc.getPage(page).then(p=>{const vp=p.getViewport({scale});const ctx=cvRef.current.getContext('2d');cvRef.current.height=vp.height;cvRef.current.width=vp.width;p.render({canvasContext:ctx,viewport:vp});});},[doc,page,scale]);
+
+  // Sequentially render all pages into their canvases whenever doc or scale changes.
+  useEffect(()=>{
+    if(!doc||!containerRef.current)return;
+    genRef.current+=1;
+    const gen=genRef.current;
+    setRenderedUpTo(0);
+    let pageNum=1;
+    function renderNext(){
+      if(gen!==genRef.current)return;          // superseded by newer doc/scale
+      if(pageNum>doc.numPages)return;          // done
+      doc.getPage(pageNum).then(function(p){
+        if(gen!==genRef.current)return;
+        const cv=containerRef.current&&containerRef.current.querySelector('[data-pdf-page="'+pageNum+'"]');
+        if(!cv)return;
+        const vp=p.getViewport({scale:scale});
+        cv.height=vp.height;cv.width=vp.width;
+        p.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise.then(function(){
+          if(gen!==genRef.current)return;
+          setRenderedUpTo(pageNum);
+          pageNum+=1;
+          renderNext();
+        }).catch(function(e){console.warn('render page '+pageNum+':',e);});
+      }).catch(function(e){console.warn('getPage '+pageNum+':',e);});
+    }
+    renderNext();
+  },[doc,scale]);
+
+  const pageNums=[];
+  if(doc){for(let i=1;i<=doc.numPages;i++)pageNums.push(i);}
+
   return(
-    <div style={{display:'flex',flexDirection:'column',alignItems:'center',background:'#e2e8f0',padding:'16px',overflowY:'auto',flex:1}} className="scr">
+    <div ref={containerRef} style={{display:'flex',flexDirection:'column',alignItems:'center',background:'#e2e8f0',padding:'16px',overflowY:'auto',flex:1}} className="scr">
       <div style={{display:'flex',gap:'8px',alignItems:'center',background:'white',padding:'8px 14px',borderRadius:'8px',boxShadow:'0 2px 8px rgba(0,0,0,0.1)',marginBottom:'16px',position:'sticky',top:0,zIndex:5}}>
-        <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page<=1} style={{padding:'4px 10px',border:'1px solid #e2e8f0',borderRadius:'4px',cursor:'pointer',fontSize:'12px',background:page<=1?'#f8fafc':'white'}}>← Prev</button>
-        <span style={{fontSize:'12px',color:'#475569',fontFamily:'IBM Plex Mono',minWidth:'80px',textAlign:'center'}}>Page {page}/{doc?.numPages||'–'}</span>
-        <button onClick={()=>setPage(p=>Math.min(doc?.numPages||1,p+1))} disabled={page>=(doc?.numPages||1)} style={{padding:'4px 10px',border:'1px solid #e2e8f0',borderRadius:'4px',cursor:'pointer',fontSize:'12px',background:page>=(doc?.numPages||1)?'#f8fafc':'white'}}>Next →</button>
+        <span style={{fontSize:'12px',color:'#475569',fontFamily:'IBM Plex Mono'}}>
+          {doc?doc.numPages+' page'+(doc.numPages===1?'':'s'):'Loading…'}
+          {doc&&renderedUpTo<doc.numPages?' (rendering '+renderedUpTo+'/'+doc.numPages+')':''}
+        </span>
         <div style={{width:'1px',height:'16px',background:'#e2e8f0',margin:'0 4px'}}/>
-        <button onClick={()=>setScale(s=>Math.max(0.5,s-0.2))} style={{padding:'4px 8px',border:'1px solid #e2e8f0',borderRadius:'4px',cursor:'pointer'}}>−</button>
+        <button onClick={()=>setScale(s=>Math.max(0.5,Math.round((s-0.2)*10)/10))} style={{padding:'4px 8px',border:'1px solid #e2e8f0',borderRadius:'4px',cursor:'pointer'}}>−</button>
         <span style={{fontSize:'11px',color:'#94a3b8',fontFamily:'IBM Plex Mono',minWidth:'36px',textAlign:'center'}}>{Math.round(scale*100)}%</span>
-        <button onClick={()=>setScale(s=>Math.min(3,s+0.2))} style={{padding:'4px 8px',border:'1px solid #e2e8f0',borderRadius:'4px',cursor:'pointer'}}>+</button>
+        <button onClick={()=>setScale(s=>Math.min(3,Math.round((s+0.2)*10)/10))} style={{padding:'4px 8px',border:'1px solid #e2e8f0',borderRadius:'4px',cursor:'pointer'}}>+</button>
       </div>
-      <canvas ref={cvRef} className="pdf-page"/>
+      {pageNums.map(function(n){
+        return(
+          <div key={n} style={{marginBottom:'14px',boxShadow:'0 2px 10px rgba(0,0,0,0.15)'}}>
+            <canvas data-pdf-page={n} className="pdf-page"/>
+          </div>
+        );
+      })}
     </div>
   );
 });
@@ -1042,6 +1096,39 @@ function createTodoProject(name){
     localStorage.setItem(TODO_KEY,JSON.stringify(arr));
     return id;
   }catch(e){console.warn('createTodoProject failed:',e);return null;}
+}
+
+// Create a task inside an existing to-do project. Returns true on success.
+// Task shape mirrors what the to-do app itself writes (see its saveEdit).
+function createTodoTask(projectId, desc, dueDate, priority){
+  try{
+    var raw=localStorage.getItem(TODO_KEY);
+    var arr=raw?JSON.parse(raw):[];
+    if(!Array.isArray(arr))return false;
+    var p=null;
+    for(var i=0;i<arr.length;i++){
+      if(String(arr[i].id)===String(projectId)){p=arr[i];break;}
+    }
+    if(!p)return false;
+    if(!p.tasks)p.tasks=[];
+    var today=new Date();
+    var iso=function(d){
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    };
+    p.tasks.push({
+      id:'t_'+Date.now(),           // string id — to-do app's sameId() handles it
+      desc:desc||'New task',
+      initiated:iso(today),
+      due:dueDate||iso(today),
+      priority:priority||'medium',
+      status:'active',
+      type:'task',
+      hours:'', assignee:'', tag:'', ref:'', url:'',
+      subtasks:[], comments:[]
+    });
+    localStorage.setItem(TODO_KEY,JSON.stringify(arr));
+    return true;
+  }catch(e){console.warn('createTodoTask failed:',e);return false;}
 }
 
 // Badge counts per notebook: {nbId: {open, overdue}} from linked to-do projects.
@@ -2234,6 +2321,203 @@ const ImportDestinationModal=({mode,payload,projects,onConfirm,onClose})=>{
   );
 };
 
+// ── Master Calendar: one month grid showing EVERYTHING across both apps ─────
+// Sources: notebook task due dates, notebook calendar events, and to-do items.
+// LoCoNotes events remain editable; to-do items are click-through to the To-Do app.
+// Clicking a day also lets you create a to-do item directly.
+const MasterCalendar=({projects,onNavigate,onCreateTodo,onClose,refreshKey})=>{
+  const[cur,setCur]=useState(new Date());
+  const[dayModal,setDayModal]=useState(null); // 'YYYY-MM-DD'
+  const[newTask,setNewTask]=useState({desc:'',projectId:'',priority:'medium'});
+
+  const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const pad=function(n){return String(n).padStart(2,'0');};
+  const ymd=function(y,m,d){return y+'-'+pad(m+1)+'-'+pad(d);};
+  const today=new Date();
+  const todayStr=ymd(today.getFullYear(),today.getMonth(),today.getDate());
+
+  // Index every dated item by day.
+  const byDay=useMemo(function(){
+    const map={};
+    const add=function(date,item){
+      if(!date)return;
+      if(!map[date])map[date]=[];
+      map[date].push(item);
+    };
+    projects.forEach(function(pr){
+      (pr.children||[]).forEach(function(n){
+        const m=n.metadata||{};
+        const done=m.status==='Completed'||m.status==='Archived';
+        if(m.dueDate&&!done){
+          add(m.dueDate,{kind:'task',label:'Due: '+n.title,color:'#8b5cf6',
+            nav:{type:'notebook',projId:pr.id,nbId:n.id}});
+        }
+        (n.events||[]).forEach(function(ev){
+          const tc={Deliverable:'#dc2626','Field Visit':'#10b981',QC:'#f59e0b',Meeting:'#3b82f6',Other:'#94a3b8'};
+          add(ev.date,{kind:'event',label:ev.title,color:tc[ev.type]||'#94a3b8',
+            nav:{type:'notebook',projId:pr.id,nbId:n.id}});
+        });
+      });
+    });
+    readTodoProjects().forEach(function(tp){
+      if(tp.archived)return;
+      (tp.tasks||[]).forEach(function(t){
+        if(t.completedDate||!t.due)return;
+        const pc={high:'#ef4444',medium:'#f59e0b',low:'#64748b'};
+        add(t.due,{kind:'todo',label:t.desc,color:pc[t.priority]||'#64748b',
+          nav:{type:'todo',projectId:tp.id}});
+      });
+    });
+    return map;
+  },[projects,refreshKey]);
+
+  const todoProjects=useMemo(function(){
+    return readTodoProjects().filter(function(p){return !p.archived;});
+  },[refreshKey]);
+
+  const dim=function(d){return new Date(d.getFullYear(),d.getMonth()+1,0).getDate();};
+  const fd=function(d){return new Date(d.getFullYear(),d.getMonth(),1).getDay();};
+  const cells=[];
+  for(let i=0;i<fd(cur);i++)cells.push(null);
+  for(let d=1;d<=dim(cur);d++)cells.push(d);
+
+  const submitTask=function(){
+    if(!newTask.desc.trim()){alert('Enter a description.');return;}
+    if(!newTask.projectId){alert('Choose a to-do project.');return;}
+    const ok=onCreateTodo(newTask.projectId,newTask.desc.trim(),dayModal,newTask.priority);
+    if(ok){
+      setNewTask({desc:'',projectId:newTask.projectId,priority:'medium'});
+      setDayModal(null);
+    } else {
+      alert('Could not create the task. Open the To-Do tab once, then try again.');
+    }
+  };
+
+  return(
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{width:'860px',maxWidth:'95vw'}} onClick={function(e){e.stopPropagation();}}>
+        <div className="modal-header">
+          <span className="modal-title">Calendar — All Projects</span>
+          <button className="rail-btn" onClick={onClose}><I name="X" size={14}/></button>
+        </div>
+        <div className="modal-body scr" style={{maxHeight:'76vh',overflowY:'auto'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'12px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <button className="rail-btn" style={{width:'28px',height:'28px'}} onClick={function(){setCur(new Date(cur.getFullYear(),cur.getMonth()-1,1));}}><I name="ChevR" size={13} style={{transform:'rotate(180deg)'}}/></button>
+              <span style={{fontSize:'14px',fontWeight:600,color:'var(--text-1)',minWidth:'160px',textAlign:'center'}}>{months[cur.getMonth()]} {cur.getFullYear()}</span>
+              <button className="rail-btn" style={{width:'28px',height:'28px'}} onClick={function(){setCur(new Date(cur.getFullYear(),cur.getMonth()+1,1));}}><I name="ChevR" size={13}/></button>
+              <button className="btn btn-ghost btn-sm" onClick={function(){setCur(new Date());}}>Today</button>
+            </div>
+            <div style={{display:'flex',gap:'12px',fontSize:'10.5px',color:'var(--text-3)'}}>
+              <span><span style={{display:'inline-block',width:'8px',height:'8px',borderRadius:'2px',background:'#8b5cf6',marginRight:'4px'}}/>Task due</span>
+              <span><span style={{display:'inline-block',width:'8px',height:'8px',borderRadius:'2px',background:'#3b82f6',marginRight:'4px'}}/>Event</span>
+              <span><span style={{display:'inline-block',width:'8px',height:'8px',borderRadius:'2px',background:'#f59e0b',marginRight:'4px'}}/>To-do</span>
+            </div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:'3px'}}>
+            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(function(d){
+              return <div key={d} style={{fontSize:'10px',fontWeight:700,color:'var(--text-3)',textAlign:'center',padding:'4px 0',textTransform:'uppercase',letterSpacing:'0.06em'}}>{d}</div>;
+            })}
+            {cells.map(function(d,i){
+              if(d===null)return <div key={'e'+i} style={{minHeight:'88px'}}/>;
+              const ds=ymd(cur.getFullYear(),cur.getMonth(),d);
+              const items=byDay[ds]||[];
+              const isToday=ds===todayStr;
+              return(
+                <div key={ds} onClick={function(){setDayModal(ds);}}
+                  style={{minHeight:'88px',padding:'4px',borderRadius:'5px',cursor:'pointer',
+                    border:'1px solid '+(isToday?'var(--accent-2)':'var(--border)'),
+                    background:isToday?'var(--accent-glow)':'var(--surface)',
+                    display:'flex',flexDirection:'column',gap:'2px',overflow:'hidden'}}>
+                  <div style={{fontSize:'11px',fontWeight:isToday?700:500,color:isToday?'var(--accent-2)':'var(--text-2)'}}>{d}</div>
+                  {items.slice(0,3).map(function(it,k){
+                    return(
+                      <div key={k} title={it.label}
+                        onClick={function(e){e.stopPropagation();onNavigate(it.nav);onClose();}}
+                        style={{fontSize:'9.5px',padding:'1px 4px',borderRadius:'3px',cursor:'pointer',
+                          background:it.color+'26',color:it.color,fontWeight:600,
+                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                        {it.label}
+                      </div>
+                    );
+                  })}
+                  {items.length>3&&<div style={{fontSize:'9px',color:'var(--text-3)'}}>+{items.length-3} more</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Day detail: full list + create a to-do item on this date */}
+      {dayModal&&(
+        <div className="modal-overlay" onClick={function(e){e.stopPropagation();setDayModal(null);}} style={{zIndex:10002}}>
+          <div className="modal-box" style={{width:'440px'}} onClick={function(e){e.stopPropagation();}}>
+            <div className="modal-header">
+              <span className="modal-title">{dayModal}</span>
+              <button className="rail-btn" onClick={function(){setDayModal(null);}}><I name="X" size={14}/></button>
+            </div>
+            <div className="modal-body scr" style={{maxHeight:'60vh',overflowY:'auto'}}>
+              {(byDay[dayModal]||[]).length>0&&(
+                <div style={{marginBottom:'16px',display:'flex',flexDirection:'column',gap:'5px'}}>
+                  {(byDay[dayModal]||[]).map(function(it,k){
+                    return(
+                      <div key={k} onClick={function(){onNavigate(it.nav);onClose();}}
+                        style={{display:'flex',alignItems:'center',gap:'8px',padding:'8px 10px',borderRadius:'6px',
+                          border:'1px solid var(--border)',background:'var(--surface)',cursor:'pointer'}}>
+                        <div style={{width:'6px',height:'6px',borderRadius:'50%',background:it.color,flexShrink:0}}/>
+                        <span style={{fontSize:'12.5px',color:'var(--text-1)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{it.label}</span>
+                        <span style={{fontSize:'10px',color:'var(--text-3)',textTransform:'uppercase',flexShrink:0}}>{it.kind}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{fontSize:'11px',fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'10px',paddingBottom:'8px',borderBottom:'1px solid var(--border)'}}>New To-Do Item</div>
+              {todoProjects.length===0?(
+                <div style={{fontSize:'12px',color:'var(--text-3)',lineHeight:1.5}}>No to-do projects yet. Open the To-Do tab and create one first.</div>
+              ):(
+                <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+                  <div>
+                    <label className="form-label">Description</label>
+                    <input className="form-input" value={newTask.desc} placeholder="What needs doing?"
+                      onChange={function(e){setNewTask(Object.assign({},newTask,{desc:e.target.value}));}}/>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:'10px'}}>
+                    <div>
+                      <label className="form-label">Project</label>
+                      <select className="form-select" value={newTask.projectId}
+                        onChange={function(e){setNewTask(Object.assign({},newTask,{projectId:e.target.value}));}}>
+                        <option value="">— Choose —</option>
+                        {todoProjects.map(function(p){
+                          return <option key={p.id} value={p.id}>{p.name}</option>;
+                        })}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Priority</label>
+                      <select className="form-select" value={newTask.priority}
+                        onChange={function(e){setNewTask(Object.assign({},newTask,{priority:e.target.value}));}}>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer" style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
+              <button className="btn btn-ghost" onClick={function(){setDayModal(null);}}>Cancel</button>
+              {todoProjects.length>0&&<button className="btn btn-primary" onClick={submitTask}>Add To-Do</button>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Deadlines rollup: everything dated across LoCoNotes + To-Do ─────────────
 const DeadlinesModal=({projects,onNavigate,onClose})=>{
   const items=useMemo(function(){return gatherDeadlines(projects);},[projects]);
@@ -3053,6 +3337,13 @@ function App(){
   const[undoState,setUndoState]=useState(null); // {kind,message,payload}
   const[backupTick,setBackupTick]=useState(0); // bump to refresh the backup banner
   const[todoTick,setTodoTick]=useState(0); // bump when to-do data changes (badges/deadlines)
+  // Shared navigation for dated items: LoCoNotes items select the notebook;
+  // to-do items open the To-Do panel filtered to that project.
+  const handleDatedNav=(nav)=>{
+    if(!nav)return;
+    if(nav.type==='notebook'){setSelProj(nav.projId);setSelNote(nav.nbId);setSelPage(null);}
+    else if(nav.type==='todo'){openTodo(nav.projectId);}
+  };
   useEffect(function(){
     const onMsg=function(ev){
       const d=ev.data||{};
@@ -3311,7 +3602,8 @@ function App(){
         <button className={'rail-btn'+(aiOpen?' active':'')} onClick={()=>setAiOpen(o=>!o)}><I name="Sparkles" size={16}/><span className="tooltip">AI Assistant ⌃\</span></button>
         <button className="rail-btn" onClick={()=>setModal('templates')}><I name="Layout" size={16}/><span className="tooltip">Templates</span></button>
         <button className={'rail-btn'+(todoView?' active':'')} onClick={()=>openTodo(null)}><I name="Check" size={16}/><span className="tooltip">To-Do</span></button>
-        <button className="rail-btn" onClick={()=>setModal('deadlines')}><I name="Calendar" size={16}/><span className="tooltip">Deadlines</span></button>
+        <button className="rail-btn" onClick={()=>setModal('calendar')}><I name="Calendar" size={16}/><span className="tooltip">Calendar</span></button>
+        <button className="rail-btn" onClick={()=>setModal('deadlines')}><I name="Activity" size={16}/><span className="tooltip">Deadlines</span></button>
         <div className="rail-divider"/>
         <button className="rail-btn" onClick={()=>setModal('diag')}><I name="Activity" size={16}/><span className="tooltip">Diagnostics</span></button>
         <div className="rail-spacer"/>
@@ -3493,10 +3785,14 @@ function App(){
       {modal==='search'&&<SearchOverlay projects={projects} onClose={()=>setModal(null)} onSelect={function(r){setSelProj(r.projId);setSelNote(r.notebookId);setSelPage(r.kind==='task'?null:r.id);setActivePane('primary');setMobileView('editor');setModal(null);}}/>}
       {modal==='settings'&&<SettingsModal key={backupTick} settings={settings} projects={projects} onStageImport={handleStageImport} onBackupDone={()=>setBackupTick(function(t){return t+1;})} onClose={()=>setModal(null)} onSave={s=>{setSettings(s);idb.putSetting('appSettings',s);try{localStorage.setItem('neuronote_settings',JSON.stringify(s));}catch(e){}}}/>}
       {importStage&&<ImportDestinationModal mode={importStage.mode} payload={importStage.payload} projects={projects} onConfirm={handleImportConfirm} onClose={()=>setImportStage(null)}/>}
-      {modal==='deadlines'&&<DeadlinesModal projects={projects} onClose={()=>setModal(null)} onNavigate={function(nav){
-        if(nav.type==='notebook'){setSelProj(nav.projId);setSelNote(nav.nbId);setSelPage(null);}
-        else if(nav.type==='todo'){openTodo(nav.projectId);}
-      }}/>}
+      {modal==='deadlines'&&<DeadlinesModal projects={projects} onClose={()=>setModal(null)} onNavigate={handleDatedNav}/>}
+      {modal==='calendar'&&<MasterCalendar projects={projects} refreshKey={todoTick} onClose={()=>setModal(null)}
+        onNavigate={handleDatedNav}
+        onCreateTodo={function(projectId,desc,due,priority){
+          const ok=createTodoTask(projectId,desc,due,priority);
+          if(ok)setTodoTick(function(t){return t+1;}); // refresh badges/calendar
+          return ok;
+        }}/>}
       {ctxMenu&&<ProjectContextMenu x={ctxMenu.x} y={ctxMenu.y} project={ctxMenu.project} clients={clients} onMove={moveProjectToClient} onClose={()=>setCtxMenu(null)}/>}
       {undoState&&<UndoToast message={undoState.message} onUndo={performUndo} onDismiss={()=>setUndoState(null)}/>}
       {todoView&&todoView.mode==='full'&&(
