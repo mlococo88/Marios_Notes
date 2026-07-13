@@ -258,7 +258,7 @@ canvas.pdf-page{box-shadow:0 4px 16px rgba(0,0,0,0.15);margin-bottom:16px;displa
 <body>
 <div id="root"></div>
 <script type="text/babel">
-console.log("[LoCoNotes] build 2026-07-13.1");
+console.log("[LoCoNotes] build 2026-07-13.2");
 const {useState,useEffect,useMemo,useRef,useCallback,memo,createContext,useContext}=React;
 const APP_VER='2.0.0';
 const DB_NAME='LoCoNotesV2';
@@ -2896,7 +2896,9 @@ function App(){
     if(!todoView)return '';
     let h='#embed=1';
     if(todoView.projectId)h+='&project='+encodeURIComponent(todoView.projectId);
-    return 'todo.html'+h;
+    // Cache-buster: GitHub Pages' CDN caches for ~10 min and iframes dodge
+    // hard-refresh, so stamp each open with a unique query to force a fresh fetch.
+    return 'todo.html?v='+Date.now()+h;
   })();
 
   const delProject=(e,id)=>{
