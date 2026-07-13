@@ -516,7 +516,7 @@
         let compactMode = false;
 
         const AppData = { PROJECTS: 'projectTrackerData_v4', META: 'projectTrackerMeta_v4', LAST: 'projectTrackerLastSave_v4' };
-        console.log("[ToDo] build 2026-07-13.1");
+        console.log("[ToDo] build 2026-07-13.2");
 
         // Robust ID matching: project/task IDs may be numbers OR strings depending
         // on how they were created (literal, Date.now(), JSON round-trip, import).
@@ -1430,9 +1430,9 @@
         }
 
         function saveEdit() {
-            const pid = parseInt(document.getElementById('edit-pid').value);
+            const pid = document.getElementById('edit-pid').value; // raw ID — parseInt truncates fractional IDs
             const tid = document.getElementById('edit-tid').value; // Empty string if new
-            const newPid = parseInt(document.getElementById('edit-move-project').value);
+            const newPid = document.getElementById('edit-move-project').value;
             
             let p = data.projects.find(x => sameId(x.id, pid));
             if (!p && !document.getElementById('edit-tid').value) {
@@ -1472,12 +1472,12 @@
             }
 
             // Existing Task Logic
-            const realTid = parseInt(tid);
+            const realTid = tid; // raw ID
             let taskIndex = p.tasks.findIndex(x => sameId(x.id, realTid));
             let task = p.tasks[taskIndex];
 
             // Move Project Logic
-            if (newPid !== pid) {
+            if (!sameId(newPid, pid)) {
                 p.tasks.splice(taskIndex, 1); // Remove from old
                 p = data.projects.find(x => sameId(x.id, newPid)); // Switch to new project context
                 p.tasks.push(task); // Add to new
@@ -1515,8 +1515,8 @@
         }
 
         function togglePin() {
-            const pid = parseInt(document.getElementById('edit-pid').value);
-            const tid = parseInt(document.getElementById('edit-tid').value);
+            const pid = document.getElementById('edit-pid').value; // raw ID — parseInt truncates fractional IDs
+            const tid = document.getElementById('edit-tid').value;
             const p = data.projects.find(x => sameId(x.id, pid));
             const t = p.tasks.find(x => sameId(x.id, tid));
             t.pinned = !t.pinned;
@@ -1525,8 +1525,8 @@
         }
         
         function moveToTrash() {
-            const pid = parseInt(document.getElementById('edit-pid').value);
-            const tid = parseInt(document.getElementById('edit-tid').value);
+            const pid = document.getElementById('edit-pid').value; // raw ID — parseInt truncates fractional IDs
+            const tid = document.getElementById('edit-tid').value;
             const p = data.projects.find(x => sameId(x.id, pid));
             if (!p) {
                 showToast("Could not find that project. Try reloading.");
@@ -1806,7 +1806,7 @@
         function formatDate(s) { if(!s) return '-'; const d = new Date(s+'T00:00:00'); return `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`; }
         function toggleSelectAll(cb) { document.querySelectorAll('input[type="checkbox"]').forEach(c => { if(c.value) {c.checked = cb.checked; toggleSelect(c.value)}}); }
         function toggleSelect(id) { 
-            if(selectedTasks.has(parseInt(id))) selectedTasks.delete(parseInt(id)); else selectedTasks.add(parseInt(id)); 
+            if(selectedTasks.has(String(id))) selectedTasks.delete(String(id)); else selectedTasks.add(String(id)); 
             document.getElementById('bulk-actions').classList.toggle('hidden', selectedTasks.size === 0);
             document.getElementById('selected-count').textContent = selectedTasks.size;
         }
@@ -1814,7 +1814,7 @@
             if(!confirm('Confirm bulk action?')) return;
             data.projects.forEach(p => {
                 p.tasks.forEach(t => {
-                    if(selectedTasks.has(t.id)) {
+                    if(selectedTasks.has(String(t.id))) {
                         if(type === 'complete') t.completedDate = toLocalYYYYMMDD(new Date());
                         if(type === 'delete') { t.deleted = true; } // logic simplified
                     }
