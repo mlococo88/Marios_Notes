@@ -264,7 +264,7 @@ canvas.pdf-page{box-shadow:0 4px 16px rgba(0,0,0,0.15);margin-bottom:16px;displa
 <body>
 <div id="root"></div>
 <script type="text/babel">
-console.log("[LoCoNotes] build 2026-07-13.9");
+console.log("[LoCoNotes] build 2026-07-13.10");
 const {useState,useEffect,useMemo,useRef,useCallback,memo,createContext,useContext}=React;
 const APP_VER='2.0.0';
 const DB_NAME='LoCoNotesV2';
@@ -3026,34 +3026,41 @@ function App(){
     sessionRestored.current=true;
     const data=window._lcInitData;
     delete window._lcInitData;
-    const lp=localStorage.getItem('lc_lastProj');
-    let selP=null,selN=null,selPg=null;
-    if(lp&&data.find(function(p){return p.id===lp;})){
-      selP=lp;
-      const ln=localStorage.getItem('lc_lastNote');
-      const lpg=localStorage.getItem('lc_lastPage');
-      // Walk the tree to verify and resolve the full parent chain
-      outer:for(let i=0;i<data.length;i++){
-        const proj=data[i];
-        const nbs=proj.children||[];
-        for(let j=0;j<nbs.length;j++){
-          const nb=nbs[j];
-          const pgs=nb.children||[];
-          for(let k=0;k<pgs.length;k++){
-            if(pgs[k].id===lpg){selP=proj.id;selN=nb.id;selPg=lpg;break outer;}
-          }
-        }
-      }
-      if(!selPg&&ln){
-        // No matching page - just restore notebook
-        selN=ln;
-      }
-    } else if(data.length){
-      selP=data[0].id;
+    // Read the saved session (with a one-time migration from the old 3-key format).
+    let sess=null;
+    try{
+      const raw=localStorage.getItem('lc_session');
+      if(raw)sess=JSON.parse(raw);
+    }catch(e){}
+    if(!sess){
+      sess={
+        proj:localStorage.getItem('lc_lastProj')||null,
+        note:localStorage.getItem('lc_lastNote')||null,
+        page:localStorage.getItem('lc_lastPage')||null
+      };
     }
-    if(selP)setSelProj(selP);
-    if(selN)setSelNote(selN);
-    if(selPg)setSelPage(selPg);
+
+    // Validate the chain top-down. Each level must actually exist AND be a child
+    // of the level above it. Any break, and we stop there rather than guessing —
+    // this is what prevents landing in an unrelated notebook.
+    let selP=null,selN=null,selPg=null;
+    const proj=sess.proj?data.find(function(p){return p.id===sess.proj;}):null;
+    if(proj){
+      selP=proj.id;
+      const nb=sess.note?(proj.children||[]).find(function(n){return n.id===sess.note;}):null;
+      if(nb){
+        selN=nb.id;
+        // Only restore the page if it belongs to THIS notebook.
+        const pg=sess.page?(nb.children||[]).find(function(p){return p.id===sess.page;}):null;
+        if(pg)selPg=pg.id;
+      }
+    }
+    // Nothing valid saved → land on the first project, nothing else.
+    if(!selP&&data.length)selP=data[0].id;
+
+    setSelProj(selP);
+    setSelNote(selN);
+    setSelPage(selPg);
   },[projects]);
 
   const dProjects=useDebounce(projects,700);
@@ -3067,9 +3074,18 @@ function App(){
   // engBlocks saved via normal project autosave - no separate effect needed
 
   // Session
-  useEffect(()=>{if(selProj)localStorage.setItem('lc_lastProj',selProj);},[selProj]);
-  useEffect(()=>{if(selNote)localStorage.setItem('lc_lastNote',selNote);},[selNote]);
-  useEffect(()=>{if(selPage)localStorage.setItem('lc_lastPage',selPage);},[selPage]);
+  // Session is saved as ONE object so the three IDs can never drift apart.
+  // The old code guarded each write with `if(sel...)`, so clearing a selection
+  // left the previous value behind — on reload it would restore a stale page
+  // from a different notebook. Nulls must be persisted too.
+  useEffect(function(){
+    if(status!=='ready')return; // don't overwrite a saved session during init
+    try{
+      localStorage.setItem('lc_session',JSON.stringify({
+        proj:selProj||null, note:selNote||null, page:selPage||null
+      }));
+    }catch(e){}
+  },[selProj,selNote,selPage,status]);
 
   // Keyboard shortcuts
   useKbd(useMemo(()=>({
