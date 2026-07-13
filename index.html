@@ -267,7 +267,7 @@ const PAGE_BGS={None:{label:'Plain',cls:'',style:{backgroundColor:'#fff'}},Ruled
 const ENG_BLOCK_TYPES=[{id:'calc',label:'Calculation Block',icon:'∑'},{id:'note',label:'Note / Callout',icon:'ℹ'},{id:'warn',label:'Warning',icon:'⚠'},{id:'alert',label:'Alert / Issue',icon:'⛔'},{id:'action',label:'Action Items',icon:'☑'},{id:'photo',label:'Photo Log',icon:'📷'},{id:'sketch',label:'Sketch',icon:'✏'},{id:'rfi',label:'RFI / Submittal',icon:'📋'}];
 const AI_CHIPS=[{label:'Extract action items',prompt:'Extract and list all action items from this content as a numbered checklist with assignees and due dates where mentioned.'},{label:'Executive summary',prompt:'Generate a concise executive summary (3-4 paragraphs) suitable for senior stakeholders.'},{label:'Open issues',prompt:'Identify and list all open issues, risks, or deficiencies mentioned.'},{label:'Daily field report',prompt:'Draft a structured daily field report with sections for personnel, work performed, and issues observed.'},{label:'Meeting minutes',prompt:'Format as formal meeting minutes with attendees, discussion items, decisions, and action items.'},{label:'RFI log',prompt:'Extract any requests for information or submittals and format as a numbered RFI log table.'}];
 const INITIAL_TEMPLATES=[{id:'tpl-calc',name:'Calculation Sheet',pageSize:'Letter',pageBackground:'Engineering',content:'<h1>Engineering Calculation</h1><p><strong>Project:</strong>&nbsp;&nbsp;&nbsp;<strong>Date:</strong>&nbsp;&nbsp;&nbsp;<strong>By:</strong>&nbsp;&nbsp;&nbsp;<strong>Sheet:</strong>__ of __</p><hr/><h2>1. Purpose</h2><p></p><h2>2. References</h2><p></p><h2>3. Loads &amp; Parameters</h2><p></p><h2>4. Analysis</h2><p></p><h2>5. Results</h2><p></p>'},{id:'tpl-dfr',name:'Daily Field Report',pageSize:'Letter',pageBackground:'Ruled',content:'<h1>Daily Field Report</h1><table><thead><tr><th>Project</th><th>Date</th><th>Weather</th><th>Temp °F</th></tr></thead><tbody><tr><td></td><td></td><td></td><td></td></tr></tbody></table><h3>Personnel On Site</h3><ul><li></li></ul><h3>Work Performed Today</h3><p></p><h3>Deficiencies / Observations</h3><p>None observed.</p>'},{id:'tpl-minutes',name:'Meeting Minutes',pageSize:'Letter',pageBackground:'None',content:'<h1>Meeting Minutes</h1><table><thead><tr><th>Project</th><th>Date</th><th>Location</th><th>By</th></tr></thead><tbody><tr><td></td><td></td><td></td><td></td></tr></tbody></table><h2>Attendees</h2><table><thead><tr><th>Name</th><th>Organization</th><th>Role</th></tr></thead><tbody><tr><td></td><td></td><td></td></tr></tbody></table><h2>Discussion Items</h2><ol><li><p><strong>Topic:</strong></p><p>Discussion:</p></li></ol><h2>Action Items</h2><table><thead><tr><th>#</th><th>Action</th><th>Responsible</th><th>Due</th><th>Status</th></tr></thead><tbody><tr><td>1</td><td></td><td></td><td></td><td>Open</td></tr></tbody></table>'}];
-const INITIAL_DATA=[{id:'proj-demo',type:'project',client:'General',title:'Demo Project',metadata:{client:'ACME Infrastructure',projectNumber:'P-2025-001',manager:'J. Smith, PE',fee:'250000',status:'Active',dueDate:'2025-12-31'},events:[],children:[{id:'nb-demo',type:'notebook',title:'Getting Started',children:[{id:'pg-demo',type:'page',title:'Welcome to LoCoNotes v2',level:0,createdAt:Date.now(),content:'<h1>Welcome to LoCoNotes OneView v2</h1><p>A professional note-taking and project management platform for structural engineers and field teams.</p><h2>Key Features</h2><ul><li>Multi-panel workspace with resizable columns</li><li>Engineering content blocks: calculations, action items, photo logs, sketches, RFI logs</li><li>AI assistant with Gemini API and scoped context</li><li>PDF viewer and DOCX import</li><li>Project dashboards with calendar scheduling</li><li>Keyboard shortcuts and split-view editing</li></ul><h2>Shortcuts</h2><table><thead><tr><th>Shortcut</th><th>Action</th></tr></thead><tbody><tr><td>Ctrl+P / Ctrl+K</td><td>Search pages</td></tr><tr><td>Ctrl+\\</td><td>Toggle AI panel</td></tr><tr><td>Ctrl+Shift+S</td><td>Split view</td></tr><tr><td>Ctrl+Shift+Z</td><td>Zen mode</td></tr></tbody></table>',pageSize:'Letter',pageBackground:'None'}]}]}];
+const INITIAL_DATA=[{id:'proj-demo',type:'project',client:'General',title:'Demo Project',metadata:{},events:[],children:[{id:'nb-demo',type:'notebook',title:'Getting Started',metadata:{client:'ACME Infrastructure',projectNumber:'P-2025-001',manager:'J. Smith, PE',fee:'250000',status:'Active',dueDate:'2025-12-31',notes:''},events:[],children:[{id:'pg-demo',type:'page',title:'Welcome to LoCoNotes v2',level:0,createdAt:Date.now(),content:'<h1>Welcome to LoCoNotes OneView v2</h1><p>A professional note-taking and project management platform for structural engineers and field teams.</p><h2>Key Features</h2><ul><li>Multi-panel workspace with resizable columns</li><li>Engineering content blocks: calculations, action items, photo logs, sketches, RFI logs</li><li>AI assistant with Gemini API and scoped context</li><li>PDF viewer and DOCX import</li><li>Project dashboards with calendar scheduling</li><li>Keyboard shortcuts and split-view editing</li></ul><h2>Shortcuts</h2><table><thead><tr><th>Shortcut</th><th>Action</th></tr></thead><tbody><tr><td>Ctrl+P / Ctrl+K</td><td>Search pages</td></tr><tr><td>Ctrl+\\</td><td>Toggle AI panel</td></tr><tr><td>Ctrl+Shift+S</td><td>Split view</td></tr><tr><td>Ctrl+Shift+Z</td><td>Zen mode</td></tr></tbody></table>',pageSize:'Letter',pageBackground:'None'}]}]}];
 // ── IndexedDB ──────────────────────────────────────────────────────────────
 const idb={
   _db:null,
@@ -923,7 +923,7 @@ const PdfViewer=memo(({pageData})=>{
 });
 
 // ── Project Calendar ───────────────────────────────────────────────────────
-const ProjectCalendar=({project,onUpdate})=>{
+const ProjectCalendar=({project,onUpdate})=>{ // 'project' may be a project OR a notebook node
   const[cur,setCur]=useState(new Date());
   const[modal,setModal]=useState(null);
   const[newEv,setNewEv]=useState({title:'',type:'Deliverable'});
@@ -999,15 +999,16 @@ const ProjectCalendar=({project,onUpdate})=>{
 };
 
 // ── Project Dashboard ──────────────────────────────────────────────────────
-const ProjectDashboard=({project,onUpdate})=>{
+// ── Notebook (Task) Dashboard — metadata lives here ─────────────────────────
+const NotebookDashboard=({notebook,onUpdate})=>{
   const[tab,setTab]=useState('overview');
-  const meta=project.metadata||{};
+  const meta=notebook.metadata||{};
   const cFields=meta.customFields||[];
-  const hMeta=(k,v)=>onUpdate(project.id,{...meta,[k]:v},project.events);
-  const addF=()=>onUpdate(project.id,{...meta,customFields:[...cFields,{id:Date.now(),label:'Property',value:''}]},project.events);
-  const updF=(id,k,v)=>onUpdate(project.id,{...meta,customFields:cFields.map(f=>f.id===id?{...f,[k]:v}:f)},project.events);
-  const delF=(id)=>onUpdate(project.id,{...meta,customFields:cFields.filter(f=>f.id!==id)},project.events);
-  const pages=(project.children||[]).reduce((a,n)=>a+(n.children?.length||0),0);
+  const hMeta=(k,v)=>onUpdate(notebook.id,Object.assign({},meta,{[k]:v}),notebook.events);
+  const addF=()=>onUpdate(notebook.id,Object.assign({},meta,{customFields:cFields.concat([{id:Date.now(),label:'Property',value:''}])}),notebook.events);
+  const updF=(id,k,v)=>onUpdate(notebook.id,Object.assign({},meta,{customFields:cFields.map(function(f){return f.id===id?Object.assign({},f,{[k]:v}):f;})}),notebook.events);
+  const delF=(id)=>onUpdate(notebook.id,Object.assign({},meta,{customFields:cFields.filter(function(f){return f.id!==id;})}),notebook.events);
+  const pages=(notebook.children||[]).length;
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',background:'var(--panel-bg)'}}>
       <div style={{background:'var(--sidebar-bg)',borderBottom:'1px solid var(--border)',padding:'0 24px',display:'flex',gap:'0',flexShrink:0}}>
@@ -1017,25 +1018,32 @@ const ProjectDashboard=({project,onUpdate})=>{
           </button>
         ))}
       </div>
-      {tab==='schedule'?<ProjectCalendar project={project} onUpdate={(id,m,ev)=>onUpdate(id,m,ev)}/>:(
+      {tab==='schedule'?<ProjectCalendar project={notebook} onUpdate={(id,m,ev)=>onUpdate(id,m,ev)}/>:(
         <div style={{flex:1,overflowY:'auto',padding:'24px'}} className="scr">
           <div style={{maxWidth:'800px',margin:'0 auto',display:'flex',flexDirection:'column',gap:'16px'}}>
             <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px'}}>
-              {[{val:project.children?.length||0,lbl:'Notebooks'},{val:pages,lbl:'Pages'},{val:(project.events||[]).length,lbl:'Events'},{val:meta.fee?'$'+Number(meta.fee).toLocaleString():'—',lbl:'Fee'}].map(s=>(
+              {[{val:pages,lbl:'Pages'},{val:(notebook.events||[]).length,lbl:'Events'},{val:meta.fee?'$'+Number(meta.fee).toLocaleString():'—',lbl:'Fee'},{val:meta.status||'Active',lbl:'Status'}].map(s=>(
                 <div key={s.lbl} className="dash-card dash-stat"><div className="val" style={{fontSize:typeof s.val==='string'?'18px':'28px'}}>{s.val}</div><div className="lbl">{s.lbl}</div></div>
               ))}
             </div>
             <div className="dash-card">
-              <div style={{fontSize:'12px',fontWeight:600,color:'var(--text-2)',marginBottom:'14px',paddingBottom:'10px',borderBottom:'1px solid var(--border)',textTransform:'uppercase',letterSpacing:'0.06em'}}>Project Information</div>
+              <div style={{fontSize:'12px',fontWeight:600,color:'var(--text-2)',marginBottom:'14px',paddingBottom:'10px',borderBottom:'1px solid var(--border)',textTransform:'uppercase',letterSpacing:'0.06em'}}>Task Information</div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
-                {[['Client / Owner','client','text'],['Project Number','projectNumber','text'],['Project Manager','manager','text'],['Fee ($)','fee','number'],['Due Date','dueDate','date']].map(([l,k,t])=>(
-                  <div key={k}><label className="form-label">{l}</label><input type={t} className="form-input" value={meta[k]||''} onChange={e=>hMeta(k,e.target.value)}/></div>
-                ))}
+                {[['Client / Owner','client','text'],['Project Number','projectNumber','text'],['Project Manager','manager','text'],['Fee ($)','fee','number'],['Due Date','dueDate','date']].map(function(f){
+                  const l=f[0],k=f[1],t=f[2];
+                  return <div key={k}><label className="form-label">{l}</label><input type={t} className="form-input" value={meta[k]||''} onChange={e=>hMeta(k,e.target.value)}/></div>;
+                })}
                 <div><label className="form-label">Status</label>
                   <select className="form-select" value={meta.status||'Active'} onChange={e=>hMeta('status',e.target.value)}>
                     {['Active','On Hold','Completed','Archived'].map(s=><option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
+              </div>
+              <div style={{marginTop:'12px'}}>
+                <label className="form-label">Notes</label>
+                <textarea className="form-input" style={{width:'100%',minHeight:'90px',resize:'vertical',fontFamily:'IBM Plex Sans',lineHeight:1.5}}
+                  value={meta.notes||''} onChange={e=>hMeta('notes',e.target.value)}
+                  placeholder="General notes for this task — scope, assumptions, key contacts, budget context..."/>
               </div>
             </div>
             <div className="dash-card">
@@ -1060,13 +1068,76 @@ const ProjectDashboard=({project,onUpdate})=>{
                 <I name="Sparkles" size={16} style={{color:'var(--accent-2)',marginTop:'1px',flexShrink:0}}/>
                 <div>
                   <div style={{fontSize:'12px',fontWeight:600,color:'var(--accent-2)',marginBottom:'4px'}}>AI Context</div>
-                  <div style={{fontSize:'12px',color:'var(--text-2)',lineHeight:'1.5'}}>Project metadata and all page content are automatically included when Project or All scope is selected in the AI assistant.</div>
+                  <div style={{fontSize:'12px',color:'var(--text-2)',lineHeight:'1.5'}}>Task metadata and all page content are automatically included when Notebook, Project, or All scope is selected in the AI assistant.</div>
                 </div>
               </div>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// ── Project roll-up — read-only summary across its tasks ────────────────────
+const ProjectRollup=({project,onSelectNotebook})=>{
+  const notebooks=project.children||[];
+  const pages=notebooks.reduce(function(a,n){return a+((n.children||[]).length);},0);
+  const events=notebooks.reduce(function(a,n){return a+((n.events||[]).length);},0);
+  const totalFee=notebooks.reduce(function(a,n){
+    const f=n.metadata&&n.metadata.fee?Number(n.metadata.fee):0;
+    return a+(isNaN(f)?0:f);
+  },0);
+  const statusColor=function(s){
+    if(s==='Completed')return 'var(--success)';
+    if(s==='On Hold')return 'var(--warn)';
+    if(s==='Archived')return 'var(--text-3)';
+    return 'var(--accent-2)';
+  };
+  return(
+    <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',background:'var(--panel-bg)'}}>
+      <div style={{background:'var(--sidebar-bg)',borderBottom:'1px solid var(--border)',padding:'14px 24px',flexShrink:0}}>
+        <div style={{fontSize:'15px',fontWeight:600,color:'var(--text-1)'}}>{project.title}</div>
+        <div style={{fontSize:'11px',color:'var(--text-3)',marginTop:'2px'}}>{project.client||'General'} — project summary</div>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'24px'}} className="scr">
+        <div style={{maxWidth:'800px',margin:'0 auto',display:'flex',flexDirection:'column',gap:'16px'}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px'}}>
+            {[{val:notebooks.length,lbl:'Tasks'},{val:pages,lbl:'Pages'},{val:events,lbl:'Events'},{val:totalFee?'$'+totalFee.toLocaleString():'—',lbl:'Total Fee'}].map(s=>(
+              <div key={s.lbl} className="dash-card dash-stat"><div className="val" style={{fontSize:typeof s.val==='string'?'18px':'28px'}}>{s.val}</div><div className="lbl">{s.lbl}</div></div>
+            ))}
+          </div>
+          <div className="dash-card">
+            <div style={{fontSize:'12px',fontWeight:600,color:'var(--text-2)',marginBottom:'14px',paddingBottom:'10px',borderBottom:'1px solid var(--border)',textTransform:'uppercase',letterSpacing:'0.06em'}}>Tasks</div>
+            {notebooks.length===0?(
+              <div style={{textAlign:'center',padding:'16px',color:'var(--text-3)',fontSize:'12px',fontStyle:'italic'}}>No tasks yet. Add a notebook section to get started.</div>
+            ):(
+              <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                {notebooks.map(function(n){
+                  const m=n.metadata||{};
+                  return(
+                    <div key={n.id} onClick={function(){onSelectNotebook&&onSelectNotebook(n.id);}}
+                      style={{display:'flex',alignItems:'center',gap:'12px',padding:'10px 12px',borderRadius:'6px',cursor:'pointer',border:'1px solid var(--border)',background:'var(--surface)'}}
+                      onMouseEnter={function(e){e.currentTarget.style.borderColor='var(--border-2)';}}
+                      onMouseLeave={function(e){e.currentTarget.style.borderColor='var(--border)';}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:'13px',color:'var(--text-1)',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.title}</div>
+                        <div style={{fontSize:'11px',color:'var(--text-3)',marginTop:'2px'}}>
+                          {(n.children||[]).length} page{(n.children||[]).length===1?'':'s'}
+                          {m.projectNumber?' · '+m.projectNumber:''}
+                          {m.dueDate?' · due '+m.dueDate:''}
+                        </div>
+                      </div>
+                      {m.fee?<div style={{fontSize:'12px',color:'var(--text-2)',fontFamily:'IBM Plex Mono',flexShrink:0}}>${Number(m.fee).toLocaleString()}</div>:null}
+                      <div style={{fontSize:'10px',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.06em',color:statusColor(m.status),flexShrink:0}}>{m.status||'Active'}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1338,10 +1409,26 @@ const AIPanel=({projects,selectedProjId,selectedNoteId,selectedPageId,settings,o
   const buildContext=()=>{
     let ctx='';
     const proj=projects.find(p=>p.id===selectedProjId);
-    if(proj?.metadata&&(scope==='project'||scope==='all')){
-      const m=proj.metadata;
-      ctx+='PROJECT: '+proj.title+'\nClient: '+(m.client||'N/A')+' | PM: '+(m.manager||'N/A')+' | Status: '+(m.status||'N/A')+' | Fee: $'+(m.fee||'N/A')+'\n';
-      (m.customFields||[]).forEach(f=>{ctx+=f.label+': '+f.value+'\n';});ctx+='\n';
+    // Task (notebook) metadata is the record of substance; include the tasks in scope.
+    if(proj&&(scope==='notebook'||scope==='project'||scope==='all')){
+      const nbs=(proj.children||[]).filter(function(n){
+        if(scope==='notebook')return n.id===selectedNoteId;
+        return true; // project/all scope: include every task in the project
+      });
+      const withMeta=nbs.filter(function(n){return n.metadata&&Object.keys(n.metadata).length;});
+      if(withMeta.length){
+        ctx+='PROJECT: '+proj.title+'\n';
+        withMeta.forEach(function(n){
+          const m=n.metadata||{};
+          ctx+='TASK: '+n.title+'\n';
+          ctx+='  Client: '+(m.client||'N/A')+' | PM: '+(m.manager||'N/A')+' | Status: '+(m.status||'N/A')+' | Fee: $'+(m.fee||'N/A')+'\n';
+          if(m.projectNumber)ctx+='  Project No: '+m.projectNumber+'\n';
+          if(m.dueDate)ctx+='  Due: '+m.dueDate+'\n';
+          if(m.notes)ctx+='  Notes: '+m.notes+'\n';
+          (m.customFields||[]).forEach(function(f){ctx+='  '+f.label+': '+f.value+'\n';});
+        });
+        ctx+='\n';
+      }
     }
     projects.forEach(p=>(p.children||[]).forEach(n=>(n.children||[]).forEach(pg=>{
       const inScope=(scope==='page'&&pg.id===selectedPageId)||(scope==='notebook'&&n.id===selectedNoteId)||(scope==='project'&&p.id===selectedProjId)||(scope==='all');
@@ -2125,6 +2212,30 @@ function App(){
             console.log('[LoCoNotes] Eng block migration complete.');
           }
         }catch(e){console.warn('Eng block migration error:',e);}
+        // One-time migration: metadata moved from project level down to notebook (task) level.
+        // Move any existing project.metadata into its first notebook if that notebook has none.
+        try{
+          const migFlag=localStorage.getItem('lc_meta_to_notebook');
+          if(!migFlag){
+            let changed=false;
+            data=data.map(function(p){
+              const pm=p.metadata||{};
+              const hasProjMeta=Object.keys(pm).length>0;
+              if(!hasProjMeta)return p;
+              const nbs=p.children||[];
+              if(!nbs.length)return p; // nowhere to move it; leave as-is
+              const first=nbs[0];
+              const nbMeta=first.metadata||{};
+              if(Object.keys(nbMeta).length>0)return p; // notebook already has its own
+              changed=true;
+              const newNbs=nbs.slice();
+              newNbs[0]=Object.assign({},first,{metadata:pm,events:first.events||p.events||[]});
+              return Object.assign({},p,{children:newNbs,metadata:{}});
+            });
+            localStorage.setItem('lc_meta_to_notebook','1');
+            if(changed)console.log('[LoCoNotes] Migrated project metadata to task level.');
+          }
+        }catch(e){console.warn('Metadata migration error:',e);}
         setProjects(data);
         // Store session data for restoration after projects state updates
         // Using a ref avoids the async batching race between setProjects and setSelXxx
@@ -2476,6 +2587,17 @@ function App(){
     setExpanded(function(prev){return Object.assign({},prev,{[group]:true});});
   };
 
+  // Update a notebook's (task's) metadata and events.
+  const updateNotebookMeta=(nbId,metadata,events)=>{
+    updateTree(function(p){
+      const nbs=p.children||[];
+      if(!nbs.some(function(n){return n.id===nbId;}))return p;
+      return Object.assign({},p,{children:nbs.map(function(n){
+        return n.id===nbId?Object.assign({},n,{metadata:metadata,events:events||n.events||[]}):n;
+      })});
+    });
+  };
+
   const moveClient=(e,name,dir)=>{
     e.stopPropagation();
     const idx=clients.indexOf(name);
@@ -2751,8 +2873,10 @@ function App(){
             <div style={{flex:splitMode?'0 0 '+splitRatio+'%':1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
               {activePage
                 ?renderEditorPane(activePage,'primary',engineRef,activePane==='primary')
-                :activeProject
-                  ?<ProjectDashboard project={activeProject} onUpdate={(id,m,ev)=>updateTree(p=>p.id===id?{...p,metadata:m,events:ev}:p)}/>
+                :activeNotebook
+                  ?<NotebookDashboard notebook={activeNotebook} onUpdate={updateNotebookMeta}/>
+                  :activeProject
+                    ?<ProjectRollup project={activeProject} onSelectNotebook={selectNotebook}/>
                   :<div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:'16px',color:'var(--text-3)',background:'var(--panel-bg)'}}>
                     <div style={{width:'52px',height:'52px',background:'var(--accent)',borderRadius:'14px',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'IBM Plex Mono',fontWeight:600,fontSize:'15px',color:'white',opacity:0.25}}>LC</div>
                     <span style={{fontSize:'13px'}}>Select a project to get started</span>
