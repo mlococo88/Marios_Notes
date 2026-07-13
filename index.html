@@ -1142,6 +1142,24 @@ const ProjectRollup=({project,onSelectNotebook})=>{
   );
 };
 
+// ── Undo toast (deletion recovery) ──────────────────────────────────────────
+const UndoToast=({message,onUndo,onDismiss})=>{
+  useEffect(function(){
+    const t=setTimeout(onDismiss,10000); // auto-dismiss after 10s
+    return function(){clearTimeout(t);};
+  },[]);
+  return(
+    <div style={{position:'fixed',bottom:'24px',left:'50%',transform:'translateX(-50%)',zIndex:10001,
+      background:'var(--surface-2)',border:'1px solid var(--border-2)',borderRadius:'8px',
+      boxShadow:'0 8px 28px rgba(0,0,0,0.35)',padding:'10px 12px 10px 16px',
+      display:'flex',alignItems:'center',gap:'14px',minWidth:'300px',animation:'fadeIn 0.15s ease'}}>
+      <span style={{fontSize:'13px',color:'var(--text-1)',flex:1}}>{message}</span>
+      <button className="btn btn-ghost btn-sm" style={{color:'var(--accent-2)',fontWeight:600}} onClick={onUndo}>Undo</button>
+      <button className="rail-btn" style={{width:'26px',height:'26px'}} onClick={onDismiss}><I name="X" size={12}/></button>
+    </div>
+  );
+};
+
 // ── Project context menu (move to client group) ─────────────────────────────
 const ProjectContextMenu=({x,y,project,clients,onMove,onClose})=>{
   useEffect(function(){
@@ -1215,19 +1233,80 @@ const SearchOverlay=({projects,onSelect,onClose})=>{
   const inputRef=useRef(null);
   useEffect(()=>{inputRef.current?.focus();},[]);
   const clean=(html)=>html?html.replace(/<[^>]*>/g,'').replace(/&[a-z]+;/g,' ').replace(/\s+/g,' ').trim():'';
+  // Flatten engineering-block content so blocks are searchable too.
+  const blockText=function(pg){
+    const blocks=pg.engBlocks||[];
+    let out='';
+    blocks.forEach(function(b){
+      if(b.title)out+=b.title+' ';
+      if(b.content)out+=clean(b.content)+' ';
+      // Row-based blocks (calcs, RFI logs, action items) carry arrays of fields.
+      ['rows','items','entries','photos'].forEach(function(key){
+        (b[key]||[]).forEach(function(r){
+          if(typeof r==='object'&&r){
+            Object.keys(r).forEach(function(k){
+              const v=r[k];
+              if(typeof v==='string'&&v&&k!=='id'&&!/^data:/.test(v))out+=v+' ';
+            });
+          }
+        });
+      });
+    });
+    return out.trim();
+  };
+  // Task (notebook) metadata as searchable text.
+  const metaText=function(n){
+    const m=n.metadata||{};
+    let out='';
+    ['client','projectNumber','manager','status','dueDate','notes'].forEach(function(k){
+      if(m[k])out+=m[k]+' ';
+    });
+    (m.customFields||[]).forEach(function(f){
+      if(f.label)out+=f.label+' ';
+      if(f.value)out+=f.value+' ';
+    });
+    return out.trim();
+  };
+
   const results=useMemo(()=>{
     if(!q.trim())return[];
     const lo=q.toLowerCase();const res=[];
-    projects.forEach(p=>(p.children||[]).forEach(n=>(n.children||[]).forEach(pg=>{
-      const tm=pg.title.toLowerCase().includes(lo);
-      const text=clean(pg.content||'');const cm=text.toLowerCase().includes(lo);
-      if(tm||cm){
-        let snippet='';
-        if(cm){const idx=text.toLowerCase().indexOf(lo);const s=Math.max(0,idx-40);const e2=Math.min(text.length,idx+60);snippet=(s>0?'...':'')+text.slice(s,e2)+(e2<text.length?'...':'');}
-        res.push({id:pg.id,title:pg.title,path:p.title+' › '+n.title,snippet,notebookId:n.id,projId:p.id});
-      }
-    })));
-    return res.slice(0,12);
+    projects.forEach(function(p){
+      (p.children||[]).forEach(function(n){
+        // Task-level hit: metadata matches (surfaces the task itself, not a page).
+        const nbTitleHit=(n.title||'').toLowerCase().includes(lo);
+        const mt=metaText(n);
+        const metaHit=mt.toLowerCase().includes(lo);
+        if(nbTitleHit||metaHit){
+          let snippet='';
+          if(metaHit){
+            const idx=mt.toLowerCase().indexOf(lo);
+            const s=Math.max(0,idx-40);const e2=Math.min(mt.length,idx+60);
+            snippet=(s>0?'...':'')+mt.slice(s,e2)+(e2<mt.length?'...':'');
+          }
+          res.push({id:n.id,kind:'task',title:n.title,path:p.title,snippet:snippet,
+            notebookId:n.id,projId:p.id});
+        }
+        (n.children||[]).forEach(function(pg){
+          const tm=(pg.title||'').toLowerCase().includes(lo);
+          const text=clean(pg.content||'');
+          const bt=blockText(pg);
+          const combined=text+(bt?' '+bt:'');
+          const cm=combined.toLowerCase().includes(lo);
+          if(tm||cm){
+            let snippet='';
+            if(cm){
+              const idx=combined.toLowerCase().indexOf(lo);
+              const s=Math.max(0,idx-40);const e2=Math.min(combined.length,idx+60);
+              snippet=(s>0?'...':'')+combined.slice(s,e2)+(e2<combined.length?'...':'');
+            }
+            res.push({id:pg.id,kind:'page',title:pg.title,path:p.title+' › '+n.title,
+              snippet:snippet,notebookId:n.id,projId:p.id});
+          }
+        });
+      });
+    });
+    return res.slice(0,20);
   },[q,projects]);
   const hl=(text)=>{if(!q.trim())return text;const escaped=q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');const parts=text.split(new RegExp('('+escaped+')','gi'));return parts.map((p,i)=>i%2===1?<mark key={i}>{p}</mark>:p);};
   const hk=(e)=>{
@@ -1909,13 +1988,31 @@ const ImportDestinationModal=({mode,payload,projects,onConfirm,onClose})=>{
   );
 };
 
-const SettingsModal=({settings,onSave,onClose,projects,onStageImport})=>{
+const SettingsModal=({settings,onSave,onClose,projects,onStageImport,onBackupDone})=>{
   const[s,setS]=useState(settings);
   const sectionRef=useRef(null);const pageRef=useRef(null);const jsonRef=useRef(null);
   const exportJson=()=>{
     const blob=new Blob([JSON.stringify(projects,null,2)],{type:'application/json'});
-    const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='loconotes_backup_'+Date.now()+'.json';a.click();URL.revokeObjectURL(url);
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    // Dated filename so backups sort and file cleanly.
+    const d=new Date();
+    const stamp=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    a.href=url;a.download='loconotes_backup_'+stamp+'.json';a.click();
+    URL.revokeObjectURL(url);
+    // Record the backup so we can remind the user when it goes stale.
+    try{localStorage.setItem('lc_last_backup',String(Date.now()));}catch(e){}
+    if(onBackupDone)onBackupDone();
   };
+  // Days since last backup (null if never).
+  const lastBackup=(function(){
+    try{
+      const v=localStorage.getItem('lc_last_backup');
+      if(!v)return null;
+      const ms=Date.now()-Number(v);
+      return Math.floor(ms/86400000);
+    }catch(e){return null;}
+  })();
   return(
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{width:'520px'}} onClick={e=>e.stopPropagation()}>
@@ -1974,6 +2071,25 @@ const SettingsModal=({settings,onSave,onClose,projects,onStageImport})=>{
           </div>
           <div>
             <div style={{fontSize:'11px',fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'12px',paddingBottom:'8px',borderBottom:'1px solid var(--border)'}}>Backup & Restore</div>
+            {(function(){
+              // Backup status banner: your notes live only in this browser.
+              const stale=lastBackup===null||lastBackup>=7;
+              const bg=stale?'rgba(245,158,11,0.10)':'rgba(16,185,129,0.10)';
+              const bd=stale?'rgba(245,158,11,0.30)':'rgba(16,185,129,0.30)';
+              const col=stale?'var(--warn)':'var(--success)';
+              let msg;
+              if(lastBackup===null)msg='No backup yet. Your notes exist only in this browser — export a copy to a network or cloud folder.';
+              else if(lastBackup===0)msg='Last backup: today.';
+              else if(lastBackup===1)msg='Last backup: yesterday.';
+              else if(lastBackup<7)msg='Last backup: '+lastBackup+' days ago.';
+              else msg='Last backup was '+lastBackup+' days ago. Consider exporting a fresh copy.';
+              return(
+                <div style={{background:bg,border:'1px solid '+bd,borderRadius:'6px',padding:'10px 12px',marginBottom:'10px',display:'flex',gap:'10px',alignItems:'flex-start'}}>
+                  <div style={{width:'8px',height:'8px',borderRadius:'50%',background:col,marginTop:'5px',flexShrink:0}}/>
+                  <div style={{fontSize:'12px',color:'var(--text-2)',lineHeight:1.5}}>{msg}</div>
+                </div>
+              );
+            })()}
             <div style={{display:'flex',gap:'8px'}}>
               <button className="btn btn-ghost" style={{flex:1}} onClick={exportJson}><I name="Download" size={13}/> Export JSON</button>
               <button className="btn btn-ghost" style={{flex:1}} onClick={()=>jsonRef.current?.click()}><I name="Upload" size={13}/> Import JSON</button>
@@ -2610,9 +2726,100 @@ function App(){
   };
 
   // Delete
-  const delProject=(e,id)=>{e.stopPropagation();if(confirm('Delete this project and all its contents?')){idb.deleteProject(id).catch(function(err){console.warn('deleteProject failed:',err);});setProjects(prev=>prev.filter(p=>p.id!==id));if(selProj===id){setSelProj(null);setSelNote(null);setSelPage(null);}}};
-  const delNotebook=(e,id)=>{e.stopPropagation();if(confirm('Delete this notebook and all its pages?')){updateTree(p=>p.id===selProj?{...p,children:p.children.filter(n=>n.id!==id)}:p);if(selNote===id){setSelNote(null);setSelPage(null);}}};
-  const delPage=(e,id)=>{e.stopPropagation();if(confirm('Delete this page?')){updateTree(p=>({...p,children:p.children?.map(n=>({...n,children:n.children?.filter(pg=>pg.id!==id)}))}));if(selPage===id)setSelPage(null);if(selPage2===id)setSelPage2(null);}};
+  // ── Deletion with undo ───────────────────────────────────────────────────
+  // Each delete captures the removed item plus enough location info to restore it.
+  const[undoState,setUndoState]=useState(null); // {kind,message,payload}
+  const[backupTick,setBackupTick]=useState(0); // bump to refresh the backup banner
+
+  const delProject=(e,id)=>{
+    e.stopPropagation();
+    if(!confirm('Delete this project and all its contents?'))return;
+    const proj=projects.find(function(p){return p.id===id;});
+    if(!proj)return;
+    const index=projects.findIndex(function(p){return p.id===id;});
+    idb.deleteProject(id).catch(function(err){console.warn('deleteProject failed:',err);});
+    setProjects(prev=>prev.filter(p=>p.id!==id));
+    if(selProj===id){setSelProj(null);setSelNote(null);setSelPage(null);}
+    setUndoState({kind:'project',message:'Deleted project "'+proj.title+'"',
+      payload:{project:proj,index:index}});
+  };
+
+  const delNotebook=(e,id)=>{
+    e.stopPropagation();
+    if(!confirm('Delete this notebook and all its pages?'))return;
+    const proj=projects.find(function(p){return p.id===selProj;});
+    if(!proj)return;
+    const nbs=proj.children||[];
+    const nb=nbs.find(function(n){return n.id===id;});
+    if(!nb)return;
+    const index=nbs.findIndex(function(n){return n.id===id;});
+    updateTree(p=>p.id===selProj?{...p,children:p.children.filter(n=>n.id!==id)}:p);
+    if(selNote===id){setSelNote(null);setSelPage(null);}
+    setUndoState({kind:'notebook',message:'Deleted notebook "'+nb.title+'"',
+      payload:{notebook:nb,projId:proj.id,index:index}});
+  };
+
+  const delPage=(e,id)=>{
+    e.stopPropagation();
+    if(!confirm('Delete this page?'))return;
+    // Locate the page and its parent chain so it can be put back where it was.
+    let foundPage=null,foundProjId=null,foundNbId=null,foundIndex=-1;
+    for(let i=0;i<projects.length&&!foundPage;i++){
+      const nbs=projects[i].children||[];
+      for(let j=0;j<nbs.length&&!foundPage;j++){
+        const pgs=nbs[j].children||[];
+        for(let k=0;k<pgs.length;k++){
+          if(pgs[k].id===id){
+            foundPage=pgs[k];foundProjId=projects[i].id;foundNbId=nbs[j].id;foundIndex=k;break;
+          }
+        }
+      }
+    }
+    if(!foundPage)return;
+    updateTree(p=>({...p,children:p.children?.map(n=>({...n,children:n.children?.filter(pg=>pg.id!==id)}))}));
+    if(selPage===id)setSelPage(null);
+    if(selPage2===id)setSelPage2(null);
+    setUndoState({kind:'page',message:'Deleted page "'+foundPage.title+'"',
+      payload:{page:foundPage,projId:foundProjId,nbId:foundNbId,index:foundIndex}});
+  };
+
+  // Restore whatever was last deleted, back into its original position.
+  const performUndo=()=>{
+    if(!undoState)return;
+    const pl=undoState.payload;
+    if(undoState.kind==='project'){
+      setProjects(function(prev){
+        const next=prev.slice();
+        const at=Math.min(pl.index,next.length);
+        next.splice(at,0,pl.project);
+        return next;
+      });
+      idb.putProject(pl.project).catch(function(e){console.warn('restore project failed:',e);});
+      setSelProj(pl.project.id);
+    } else if(undoState.kind==='notebook'){
+      updateTree(function(p){
+        if(p.id!==pl.projId)return p;
+        const nbs=(p.children||[]).slice();
+        const at=Math.min(pl.index,nbs.length);
+        nbs.splice(at,0,pl.notebook);
+        return Object.assign({},p,{children:nbs});
+      });
+      setSelProj(pl.projId);setSelNote(pl.notebook.id);
+    } else if(undoState.kind==='page'){
+      updateTree(function(p){
+        if(p.id!==pl.projId)return p;
+        return Object.assign({},p,{children:(p.children||[]).map(function(n){
+          if(n.id!==pl.nbId)return n;
+          const pgs=(n.children||[]).slice();
+          const at=Math.min(pl.index,pgs.length);
+          pgs.splice(at,0,pl.page);
+          return Object.assign({},n,{children:pgs});
+        })});
+      });
+      setSelProj(pl.projId);setSelNote(pl.nbId);setSelPage(pl.page.id);
+    }
+    setUndoState(null);
+  };
 
   // Indent/outdent pages
   const indentPage=(e,id)=>{e.stopPropagation();updateTree(p=>({...p,children:p.children?.map(n=>({...n,children:n.children?.map(pg=>pg.id===id?{...pg,level:Math.min((pg.level||0)+1,4)}:pg)}))}));};
@@ -2903,10 +3110,11 @@ function App(){
       </div>
 
       {/* Modals */}
-      {modal==='search'&&<SearchOverlay projects={projects} onClose={()=>setModal(null)} onSelect={function(r){setSelProj(r.projId);setSelNote(r.notebookId);setSelPage(r.id);setActivePane('primary');setMobileView('editor');setModal(null);}}/>}
-      {modal==='settings'&&<SettingsModal settings={settings} projects={projects} onStageImport={handleStageImport} onClose={()=>setModal(null)} onSave={s=>{setSettings(s);idb.putSetting('appSettings',s);try{localStorage.setItem('neuronote_settings',JSON.stringify(s));}catch(e){}}}/>}
+      {modal==='search'&&<SearchOverlay projects={projects} onClose={()=>setModal(null)} onSelect={function(r){setSelProj(r.projId);setSelNote(r.notebookId);setSelPage(r.kind==='task'?null:r.id);setActivePane('primary');setMobileView('editor');setModal(null);}}/>}
+      {modal==='settings'&&<SettingsModal key={backupTick} settings={settings} projects={projects} onStageImport={handleStageImport} onBackupDone={()=>setBackupTick(function(t){return t+1;})} onClose={()=>setModal(null)} onSave={s=>{setSettings(s);idb.putSetting('appSettings',s);try{localStorage.setItem('neuronote_settings',JSON.stringify(s));}catch(e){}}}/>}
       {importStage&&<ImportDestinationModal mode={importStage.mode} payload={importStage.payload} projects={projects} onConfirm={handleImportConfirm} onClose={()=>setImportStage(null)}/>}
       {ctxMenu&&<ProjectContextMenu x={ctxMenu.x} y={ctxMenu.y} project={ctxMenu.project} clients={clients} onMove={moveProjectToClient} onClose={()=>setCtxMenu(null)}/>}
+      {undoState&&<UndoToast message={undoState.message} onUndo={performUndo} onDismiss={()=>setUndoState(null)}/>}
       {modal==='diag'&&<DiagnosticsModal projects={projects} syncStatus={syncStatus} onClose={()=>setModal(null)} selProj={selProj} selNote={selNote} selPage={selPage}/>}
       {modal==='templates'&&<TemplateModal templates={templates} onLoad={loadTemplate} onDelete={delTemplate} onClose={()=>setModal(null)}/>}
     </div>
