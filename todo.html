@@ -517,11 +517,22 @@
 
         const AppData = { PROJECTS: 'projectTrackerData_v4', META: 'projectTrackerMeta_v4', LAST: 'projectTrackerLastSave_v4' };
 
+        // Robust ID matching: project/task IDs may be numbers OR strings depending
+        // on how they were created (literal, Date.now(), JSON round-trip, import).
+        // Strict === fails across those types, which silently breaks save/delete.
+        function sameId(a, b) {
+            if (a === null || a === undefined || b === null || b === undefined) return false;
+            return String(a) === String(b);
+        }
+        function findProject(id) { return data.projects.find(x => sameId(x.id, id)); }
+        function findTask(p, id) { return p && p.tasks ? p.tasks.find(x => sameId(x.id, id)) : undefined; }
+
         // --- CORE SAVE FUNCTION ---
         function saveData() {
             try {
                 localStorage.setItem(AppData.PROJECTS, JSON.stringify(data.projects));
                 localStorage.setItem(AppData.META, JSON.stringify(data.meta));
+                localStorage.setItem('projectTrackerTrash_v4', JSON.stringify(data.trash || []));
                 localStorage.setItem(AppData.LAST, new Date().toISOString());
                 // Notify an embedding parent (LoCoNotes) that to-do data changed.
                 try{
@@ -574,6 +585,7 @@
                 data.projects = JSON.parse(savedP);
             } else if (localStorage.getItem('projectTrackerData_v3')) {
                 data.projects = JSON.parse(localStorage.getItem('projectTrackerData_v3'));
+                try { data.trash = JSON.parse(localStorage.getItem('projectTrackerTrash_v4') || '[]'); } catch(e) { data.trash = []; }
                 saveData();
             } else {
                 // Default Data
@@ -1296,7 +1308,7 @@
             const desc = document.getElementById('global-add-desc').value.trim();
             if(!desc) return;
 
-            const p = data.projects.find(x => x.id === pid);
+            const p = data.projects.find(x => sameId(x.id, pid));
             p.tasks.push({
                 id: ++taskIdCounter,
                 desc: desc,
@@ -1374,7 +1386,7 @@
         function quickAdd(pid) {
             const val = document.getElementById(`add-input-${pid}`).value.trim();
             if(!val) return;
-            const p = data.projects.find(x => x.id === pid);
+            const p = data.projects.find(x => sameId(x.id, pid));
             const id = Date.now(); // Simple ID
             p.tasks.push({ 
                 id: ++taskIdCounter, desc: val, initiated: toLocalYYYYMMDD(new Date()), due: toLocalYYYYMMDD(new Date(Date.now()+7*86400000)), priority: 'medium', status: 'active', subtasks: [], comments: [] 
@@ -1385,7 +1397,7 @@
 
         function openEdit(id) {
             let task, pid;
-            data.projects.forEach(p => { const t = p.tasks.find(x => x.id === id); if(t){ task=t; pid=p.id; } });
+            data.projects.forEach(p => { const t = p.tasks.find(x => sameId(x.id, id)); if(t){ task=t; pid=p.id; } });
             if(!task) return;
             
             document.getElementById('edit-pid').value = pid;
@@ -1421,11 +1433,20 @@
             const tid = document.getElementById('edit-tid').value; // Empty string if new
             const newPid = parseInt(document.getElementById('edit-move-project').value);
             
-            let p = data.projects.find(x => x.id === pid);
+            let p = data.projects.find(x => sameId(x.id, pid));
+            if (!p && !document.getElementById('edit-tid').value) {
+                // New task: fall back to the selected destination project.
+                p = data.projects.find(x => sameId(x.id, newPid));
+            }
+            if (!p) {
+                showToast("Could not find that project. Try reloading.");
+                console.error("saveEdit: project not found", { pid: pid, newPid: newPid, ids: data.projects.map(x=>x.id) });
+                return;
+            }
             
             // New Task Logic
             if (!tid) {
-               p = data.projects.find(x => x.id === newPid); // Use selected project
+               p = data.projects.find(x => sameId(x.id, newPid)); // Use selected project
                p.tasks.push({
                    id: ++taskIdCounter,
                    desc: document.getElementById('edit-desc').value,
@@ -1451,13 +1472,13 @@
 
             // Existing Task Logic
             const realTid = parseInt(tid);
-            let taskIndex = p.tasks.findIndex(x => x.id === realTid);
+            let taskIndex = p.tasks.findIndex(x => sameId(x.id, realTid));
             let task = p.tasks[taskIndex];
 
             // Move Project Logic
             if (newPid !== pid) {
                 p.tasks.splice(taskIndex, 1); // Remove from old
-                p = data.projects.find(x => x.id === newPid); // Switch to new project context
+                p = data.projects.find(x => sameId(x.id, newPid)); // Switch to new project context
                 p.tasks.push(task); // Add to new
             }
 
@@ -1495,8 +1516,8 @@
         function togglePin() {
             const pid = parseInt(document.getElementById('edit-pid').value);
             const tid = parseInt(document.getElementById('edit-tid').value);
-            const p = data.projects.find(x => x.id === pid);
-            const t = p.tasks.find(x => x.id === tid);
+            const p = data.projects.find(x => sameId(x.id, pid));
+            const t = p.tasks.find(x => sameId(x.id, tid));
             t.pinned = !t.pinned;
             document.getElementById('btn-pin').innerHTML = t.pinned ? '<i class="fas fa-star text-yellow-400"></i>' : '<i class="far fa-star"></i>';
             saveData();
@@ -1505,8 +1526,13 @@
         function moveToTrash() {
             const pid = parseInt(document.getElementById('edit-pid').value);
             const tid = parseInt(document.getElementById('edit-tid').value);
-            const p = data.projects.find(x => x.id === pid);
-            const idx = p.tasks.findIndex(x => x.id === tid);
+            const p = data.projects.find(x => sameId(x.id, pid));
+            if (!p) {
+                showToast("Could not find that project. Try reloading.");
+                console.error("moveToTrash: project not found", { pid: pid });
+                return;
+            }
+            const idx = p.tasks.findIndex(x => sameId(x.id, tid));
             if (idx > -1) {
                 const t = p.tasks[idx];
                 data.trash.push({ ...t, pId: pid, deletedAt: new Date() });
@@ -1518,7 +1544,7 @@
 
         function undoAction() {
             if(undoStack && undoStack.type === 'trash') {
-                const p = data.projects.find(x => x.id === undoStack.pid);
+                const p = data.projects.find(x => sameId(x.id, undoStack.pid));
                 p.tasks.push(undoStack.task);
                 data.trash.pop();
                 saveData(); showToast("Undone!");
@@ -1538,7 +1564,7 @@
 
         function restoreTask(idx) {
             const t = data.trash[idx];
-            const p = data.projects.find(x => x.id === t.pId) || data.projects[0];
+            const p = data.projects.find(x => sameId(x.id, t.pId)) || data.projects[0];
             p.tasks.push(t);
             data.trash.splice(idx, 1);
             saveData(); openRecycleBin();
@@ -1558,8 +1584,8 @@
         function changeCal(d) { calendarDate.setMonth(calendarDate.getMonth() + d); render(); }
         function toggleCalFilter(id) { calendarFilters[id] = !calendarFilters[id]; render(); }
         function toggleCalTypeFilter(type) { calendarTypeFilters[type] = !calendarTypeFilters[type]; render(); }
-        function toggleProjView(id) { const p = data.projects.find(x => x.id === id); p.showAll = !p.showAll; render(); }
-        function toggleFocus(id) { const p = data.projects.find(x => x.id === id); p.focus = !p.focus; render(); }
+        function toggleProjView(id) { const p = data.projects.find(x => sameId(x.id, id)); p.showAll = !p.showAll; render(); }
+        function toggleFocus(id) { const p = data.projects.find(x => sameId(x.id, id)); p.focus = !p.focus; render(); }
         function setFilter(f) { filterState = f; render(); }
         function setSort(s) { sortState = s; render(); }
         function setDue(d) { 
@@ -1574,7 +1600,7 @@
             closeModal('settings-modal');
             
             if (pid) {
-                const p = data.projects.find(x => x.id === pid);
+                const p = data.projects.find(x => sameId(x.id, pid));
                 if (!p) return; 
                 document.getElementById('proj-id').value = pid;
                 document.getElementById('proj-name').value = p.name;
@@ -1608,7 +1634,7 @@
             };
 
             if (id) {
-                const p = data.projects.find(x => x.id === parseInt(id));
+                const p = data.projects.find(x => sameId(x.id, id));
                 Object.assign(p, newData);
             } else {
                 data.projects.push({
@@ -1644,7 +1670,7 @@
         }
 
         function moveProject(id, direction) {
-            const index = data.projects.findIndex(p => p.id === id);
+            const index = data.projects.findIndex(p => sameId(p.id, id));
             if (index < 0) return;
             const newIndex = index + direction;
             if (newIndex < 0 || newIndex >= data.projects.length) return;
@@ -1666,7 +1692,7 @@
             saveData(); openSettingsModal();
         }
         function updateProj(id, key, val) {
-            const p = data.projects.find(x => x.id === id);
+            const p = data.projects.find(x => sameId(x.id, id));
             p[key] = val; saveData();
         }
         function deleteProj(id) {
