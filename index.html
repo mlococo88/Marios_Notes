@@ -379,6 +379,7 @@ const PATHS={
   Cols:'M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7M12 3v18',
   Maximize:'M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3',
   Activity:'M22 12h-4l-3 9L9 3l-3 9H2',
+  Check:<><polyline points="20 6 9 17 4 12"/></>,
   Calendar:'M8 2v4M16 2v4M3 10h18M19 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z',
   Users:'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
   Undo:'M3 7v6h6M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13',
@@ -999,9 +1000,131 @@ const ProjectCalendar=({project,onUpdate})=>{ // 'project' may be a project OR a
 };
 
 // ── Project Dashboard ──────────────────────────────────────────────────────
+// ── To-Do app integration (same-origin localStorage bridge) ─────────────────
+// The to-do app (todo.html) stores its data in localStorage on the SAME origin.
+// We read it directly. This is a read-only coupling on a key we do not own:
+// if the to-do app changes its storage format, this reader needs updating.
+var TODO_KEY='projectTrackerData_v4';
+var TODO_KEY_LEGACY='projectTrackerData_v3';
+
+function readTodoProjects(){
+  try{
+    var raw=localStorage.getItem(TODO_KEY)||localStorage.getItem(TODO_KEY_LEGACY);
+    if(!raw)return [];
+    var arr=JSON.parse(raw);
+    return Array.isArray(arr)?arr:[];
+  }catch(e){return [];}
+}
+
+// Derive a display status for a to-do task (mirrors the to-do app's logic).
+function todoStatus(t){
+  if(t.completedDate)return {label:'Done',color:'var(--text-3)'};
+  if(!t.due)return {label:'No date',color:'var(--text-3)'};
+  var today=new Date();today.setHours(0,0,0,0);
+  var d=new Date(t.due+'T00:00:00');
+  var days=Math.round((d-today)/86400000);
+  if(days<0)return {label:'Overdue',color:'var(--danger)'};
+  if(days===0)return {label:'Due today',color:'var(--warn)'};
+  if(days<=7)return {label:'Due in '+days+'d',color:'var(--warn)'};
+  return {label:t.due,color:'var(--text-3)'};
+}
+
+// Read-only panel: shows the to-do items for a linked project.
+const LinkedTodoPanel=({todoProjectId,onOpenTodo,refreshKey})=>{
+  const proj=useMemo(function(){
+    const all=readTodoProjects();
+    return all.find(function(p){return String(p.id)===String(todoProjectId);})||null;
+  },[todoProjectId,refreshKey]);
+
+  if(!proj){
+    return(
+      <div className="dash-card">
+        <div style={{fontSize:'12px',color:'var(--text-3)',fontStyle:'italic'}}>
+          Linked to-do project not found. It may have been deleted, or the to-do app has not been opened on this origin yet.
+        </div>
+      </div>
+    );
+  }
+  const tasks=(proj.tasks||[]).slice();
+  const open=tasks.filter(function(t){return !t.completedDate;});
+  const done=tasks.filter(function(t){return t.completedDate;});
+  // Sort open tasks by due date, undated last.
+  open.sort(function(a,b){
+    if(!a.due)return 1;
+    if(!b.due)return -1;
+    return a.due<b.due?-1:(a.due>b.due?1:0);
+  });
+  const priColor=function(p){
+    if(p==='high')return 'var(--danger)';
+    if(p==='medium')return 'var(--warn)';
+    return 'var(--text-3)';
+  };
+  return(
+    <div className="dash-card">
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'14px',paddingBottom:'10px',borderBottom:'1px solid var(--border)'}}>
+        <span style={{fontSize:'12px',fontWeight:600,color:'var(--text-2)',textTransform:'uppercase',letterSpacing:'0.06em'}}>
+          To-Do — {proj.name}
+        </span>
+        <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+          <span style={{fontSize:'11px',color:'var(--text-3)'}}>{open.length} open · {done.length} done</span>
+          <button className="btn btn-ghost btn-sm" onClick={onOpenTodo}>Open</button>
+        </div>
+      </div>
+      {open.length===0&&done.length===0?(
+        <div style={{textAlign:'center',padding:'16px',color:'var(--text-3)',fontSize:'12px',fontStyle:'italic'}}>No to-do items in this project.</div>
+      ):(
+        <div style={{display:'flex',flexDirection:'column',gap:'5px'}}>
+          {open.map(function(t){
+            const st=todoStatus(t);
+            return(
+              <div key={t.id} style={{display:'flex',alignItems:'center',gap:'10px',padding:'8px 10px',borderRadius:'6px',border:'1px solid var(--border)',background:'var(--surface)'}}>
+                <div style={{width:'6px',height:'6px',borderRadius:'50%',background:priColor(t.priority),flexShrink:0}} title={(t.priority||'low')+' priority'}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:'12.5px',color:'var(--text-1)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.desc}</div>
+                  {(t.assignee||t.tag)&&(
+                    <div style={{fontSize:'10.5px',color:'var(--text-3)',marginTop:'2px'}}>
+                      {t.assignee?'@'+t.assignee:''}{t.assignee&&t.tag?' · ':''}{t.tag||''}
+                    </div>
+                  )}
+                </div>
+                <span style={{fontSize:'10.5px',fontWeight:600,color:st.color,flexShrink:0}}>{st.label}</span>
+              </div>
+            );
+          })}
+          {done.length>0&&(
+            <div style={{fontSize:'10px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text-3)',marginTop:'8px',marginBottom:'2px'}}>Completed</div>
+          )}
+          {done.slice(0,5).map(function(t){
+            return(
+              <div key={t.id} style={{display:'flex',alignItems:'center',gap:'10px',padding:'6px 10px',borderRadius:'6px',opacity:0.5}}>
+                <div style={{fontSize:'12px',color:'var(--text-2)',textDecoration:'line-through',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.desc}</div>
+              </div>
+            );
+          })}
+          {done.length>5&&(
+            <div style={{fontSize:'11px',color:'var(--text-3)',padding:'2px 10px'}}>+{done.length-5} more completed</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Notebook (Task) Dashboard — metadata lives here ─────────────────────────
-const NotebookDashboard=({notebook,onUpdate})=>{
+const NotebookDashboard=({notebook,onUpdate,onOpenTodo})=>{
   const[tab,setTab]=useState('overview');
+  // Bumped when the embedded to-do app reports a change, so the panel re-reads storage.
+  const[todoRefresh,setTodoRefresh]=useState(0);
+  useEffect(function(){
+    const onMsg=function(ev){
+      const d=ev.data||{};
+      if(d.source==='loco-todo'&&d.type==='data-changed'){
+        setTodoRefresh(function(n){return n+1;});
+      }
+    };
+    window.addEventListener('message',onMsg);
+    return function(){window.removeEventListener('message',onMsg);};
+  },[]);
   const meta=notebook.metadata||{};
   const cFields=meta.customFields||[];
   const hMeta=(k,v)=>onUpdate(notebook.id,Object.assign({},meta,{[k]:v}),notebook.events);
@@ -1063,6 +1186,37 @@ const NotebookDashboard=({notebook,onUpdate})=>{
                 </div>
               )}
             </div>
+            {/* To-Do integration: link this task to a project in the to-do app */}
+            <div className="dash-card">
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'12px',paddingBottom:'10px',borderBottom:'1px solid var(--border)'}}>
+                <span style={{fontSize:'12px',fontWeight:600,color:'var(--text-2)',textTransform:'uppercase',letterSpacing:'0.06em'}}>Linked To-Do Project</span>
+              </div>
+              {(function(){
+                const todoProjects=readTodoProjects().filter(function(p){return !p.archived;});
+                if(todoProjects.length===0){
+                  return(
+                    <div style={{fontSize:'12px',color:'var(--text-3)',lineHeight:1.5}}>
+                      No to-do projects found. Open the To-Do tab once so its data is available on this origin, then return here to link a project.
+                      <div style={{marginTop:'10px'}}>
+                        <button className="btn btn-ghost btn-sm" onClick={onOpenTodo}>Open To-Do</button>
+                      </div>
+                    </div>
+                  );
+                }
+                return(
+                  <div>
+                    <select className="form-select" value={meta.todoProjectId||''} onChange={e=>hMeta('todoProjectId',e.target.value)}>
+                      <option value="">— Not linked —</option>
+                      {todoProjects.map(function(p){
+                        return <option key={p.id} value={p.id}>{p.name}{p.number?' ('+p.number+')':''}</option>;
+                      })}
+                    </select>
+                    <div style={{fontSize:'11px',color:'var(--text-3)',marginTop:'6px',lineHeight:1.5}}>Linking shows this task's to-do items below. Items are managed in the To-Do tab.</div>
+                  </div>
+                );
+              })()}
+            </div>
+            {meta.todoProjectId&&<LinkedTodoPanel todoProjectId={meta.todoProjectId} onOpenTodo={onOpenTodo} refreshKey={todoRefresh}/>}
             <div className="dash-card" style={{background:'var(--accent-glow)',border:'1px solid rgba(37,99,235,0.2)'}}>
               <div style={{display:'flex',gap:'10px',alignItems:'flex-start'}}>
                 <I name="Sparkles" size={16} style={{color:'var(--accent-2)',marginTop:'1px',flexShrink:0}}/>
@@ -2731,6 +2885,19 @@ function App(){
   const[undoState,setUndoState]=useState(null); // {kind,message,payload}
   const[backupTick,setBackupTick]=useState(0); // bump to refresh the backup banner
 
+  // ── Embedded To-Do app ─────────────────────────────────────────────────
+  // todo.html lives in the same folder/origin, so it shares localStorage and
+  // can be embedded in an iframe rather than opened in a separate window.
+  const[todoView,setTodoView]=useState(null); // null | {projectId: string|null}
+  const openTodo=(projectId)=>{setTodoView({projectId:projectId||null});};
+  const closeTodo=()=>{setTodoView(null);};
+  const todoSrc=(function(){
+    if(!todoView)return '';
+    let h='#embed=1';
+    if(todoView.projectId)h+='&project='+encodeURIComponent(todoView.projectId);
+    return 'todo.html'+h;
+  })();
+
   const delProject=(e,id)=>{
     e.stopPropagation();
     if(!confirm('Delete this project and all its contents?'))return;
@@ -2953,6 +3120,7 @@ function App(){
         <button className="rail-btn" onClick={()=>setModal('search')}><I name="Search" size={16}/><span className="tooltip">Search ⌃P</span></button>
         <button className={'rail-btn'+(aiOpen?' active':'')} onClick={()=>setAiOpen(o=>!o)}><I name="Sparkles" size={16}/><span className="tooltip">AI Assistant ⌃\</span></button>
         <button className="rail-btn" onClick={()=>setModal('templates')}><I name="Layout" size={16}/><span className="tooltip">Templates</span></button>
+        <button className={'rail-btn'+(todoView?' active':'')} onClick={()=>openTodo(null)}><I name="Check" size={16}/><span className="tooltip">To-Do</span></button>
         <div className="rail-divider"/>
         <button className="rail-btn" onClick={()=>setModal('diag')}><I name="Activity" size={16}/><span className="tooltip">Diagnostics</span></button>
         <div className="rail-spacer"/>
@@ -3081,7 +3249,7 @@ function App(){
               {activePage
                 ?renderEditorPane(activePage,'primary',engineRef,activePane==='primary')
                 :activeNotebook
-                  ?<NotebookDashboard notebook={activeNotebook} onUpdate={updateNotebookMeta}/>
+                  ?<NotebookDashboard notebook={activeNotebook} onUpdate={updateNotebookMeta} onOpenTodo={function(){openTodo((activeNotebook.metadata||{}).todoProjectId||null);}}/>
                   :activeProject
                     ?<ProjectRollup project={activeProject} onSelectNotebook={selectNotebook}/>
                   :<div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:'16px',color:'var(--text-3)',background:'var(--panel-bg)'}}>
@@ -3115,6 +3283,27 @@ function App(){
       {importStage&&<ImportDestinationModal mode={importStage.mode} payload={importStage.payload} projects={projects} onConfirm={handleImportConfirm} onClose={()=>setImportStage(null)}/>}
       {ctxMenu&&<ProjectContextMenu x={ctxMenu.x} y={ctxMenu.y} project={ctxMenu.project} clients={clients} onMove={moveProjectToClient} onClose={()=>setCtxMenu(null)}/>}
       {undoState&&<UndoToast message={undoState.message} onUndo={performUndo} onDismiss={()=>setUndoState(null)}/>}
+      {todoView&&(
+        <div style={{position:'fixed',inset:0,zIndex:9998,background:'var(--panel-bg)',display:'flex',flexDirection:'column'}}>
+          <div style={{height:'44px',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 12px 0 16px',background:'var(--sidebar-bg)',borderBottom:'1px solid var(--border)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+              <I name="Check" size={15} style={{color:'var(--accent-2)'}}/>
+              <span style={{fontSize:'13px',fontWeight:600,color:'var(--text-1)'}}>To-Do</span>
+              {todoView.projectId&&(
+                <span style={{fontSize:'11px',color:'var(--text-3)'}}>— filtered to linked project</span>
+              )}
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              {todoView.projectId&&(
+                <button className="btn btn-ghost btn-sm" onClick={()=>setTodoView({projectId:null})}>Show all projects</button>
+              )}
+              <button className="rail-btn" onClick={closeTodo} title="Close"><I name="X" size={15}/></button>
+            </div>
+          </div>
+          <iframe key={todoSrc} src={todoSrc} title="To-Do"
+            style={{flex:1,width:'100%',border:'none',background:'#fff'}}/>
+        </div>
+      )}
       {modal==='diag'&&<DiagnosticsModal projects={projects} syncStatus={syncStatus} onClose={()=>setModal(null)} selProj={selProj} selNote={selNote} selPage={selPage}/>}
       {modal==='templates'&&<TemplateModal templates={templates} onLoad={loadTemplate} onDelete={delTemplate} onClose={()=>setModal(null)}/>}
     </div>
