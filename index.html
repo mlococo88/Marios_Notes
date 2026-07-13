@@ -258,7 +258,7 @@ canvas.pdf-page{box-shadow:0 4px 16px rgba(0,0,0,0.15);margin-bottom:16px;displa
 <body>
 <div id="root"></div>
 <script type="text/babel">
-console.log("[LoCoNotes] build 2026-07-13.2");
+console.log("[LoCoNotes] build 2026-07-13.4");
 const {useState,useEffect,useMemo,useRef,useCallback,memo,createContext,useContext}=React;
 const APP_VER='2.0.0';
 const DB_NAME='LoCoNotesV2';
@@ -1030,6 +1030,89 @@ function todoStatus(t){
   return {label:t.due,color:'var(--text-3)'};
 }
 
+// Create a new project in the to-do app's storage. Returns the new id or null.
+// Uses a string id ('p_'+timestamp) — the to-do app's sameId() handles it.
+function createTodoProject(name){
+  try{
+    var raw=localStorage.getItem(TODO_KEY);
+    var arr=raw?JSON.parse(raw):[];
+    if(!Array.isArray(arr))arr=[];
+    var id='p_'+Date.now();
+    arr.push({id:id,name:name||'New Project',color:'#3b82f6',archived:false,tasks:[]});
+    localStorage.setItem(TODO_KEY,JSON.stringify(arr));
+    return id;
+  }catch(e){console.warn('createTodoProject failed:',e);return null;}
+}
+
+// Badge counts per notebook: {nbId: {open, overdue}} from linked to-do projects.
+function notebookTodoCounts(projects){
+  var todo=readTodoProjects();
+  var byId={};
+  todo.forEach(function(p){byId[String(p.id)]=p;});
+  var today=new Date();today.setHours(0,0,0,0);
+  var out={};
+  projects.forEach(function(pr){
+    (pr.children||[]).forEach(function(n){
+      var link=n.metadata&&n.metadata.todoProjectId;
+      if(!link)return;
+      var tp=byId[String(link)];
+      if(!tp)return;
+      var open=0,overdue=0;
+      (tp.tasks||[]).forEach(function(t){
+        if(t.completedDate)return;
+        open++;
+        if(t.due){
+          var d=new Date(t.due+'T00:00:00');
+          if(d<today)overdue++;
+        }
+      });
+      out[n.id]={open:open,overdue:overdue};
+    });
+  });
+  return out;
+}
+
+// Gather everything with a date across both systems into one sorted list.
+// Sources: notebook metadata dueDate, notebook calendar events, open to-do items.
+function gatherDeadlines(projects){
+  var items=[];
+  var today=new Date();today.setHours(0,0,0,0);
+  var horizon=new Date(today.getTime()+60*86400000); // 60 days out
+  function push(date,kind,title,path,nav){
+    var d=new Date(date+'T00:00:00');
+    if(isNaN(d))return;
+    if(d>horizon)return; // future beyond horizon: skip
+    var days=Math.round((d-today)/86400000);
+    items.push({date:date,days:days,kind:kind,title:title,path:path,nav:nav});
+  }
+  // LoCoNotes side
+  projects.forEach(function(pr){
+    (pr.children||[]).forEach(function(n){
+      var m=n.metadata||{};
+      var done=m.status==='Completed'||m.status==='Archived';
+      if(m.dueDate&&!done){
+        push(m.dueDate,'task','Task due: '+n.title,pr.title,{type:'notebook',projId:pr.id,nbId:n.id});
+      }
+      (n.events||[]).forEach(function(ev){
+        if(ev.date){
+          push(ev.date,'event',ev.title+' ('+(ev.type||'Event')+')',pr.title+' / '+n.title,{type:'notebook',projId:pr.id,nbId:n.id});
+        }
+      });
+    });
+  });
+  // To-do side (all projects, not just linked — the rollup covers everything)
+  readTodoProjects().forEach(function(tp){
+    if(tp.archived)return;
+    (tp.tasks||[]).forEach(function(t){
+      if(t.completedDate||!t.due)return;
+      push(t.due,'todo',t.desc,tp.name,{type:'todo',projectId:tp.id});
+    });
+  });
+  // Overdue first, then soonest.
+  items.sort(function(a,b){return a.days-b.days;});
+  return items;
+}
+
 // Read-only panel: shows the to-do items for a linked project.
 const LinkedTodoPanel=({todoProjectId,onOpenTodo,refreshKey})=>{
   const proj=useMemo(function(){
@@ -1355,7 +1438,7 @@ const ProjectContextMenu=({x,y,project,clients,onMove,onClose})=>{
 };
 
 // ── Sidebar Item ───────────────────────────────────────────────────────────
-const SidebarItem=memo(({item,isSelected,isEditing,editValue,onSelect,onEditStart,onEditSave,onEditChange,onEditKeyDown,onDelete,onIndent,onOutdent,onContextMenu,icon,depth=0})=>{
+const SidebarItem=memo(({item,isSelected,isEditing,editValue,onSelect,onEditStart,onEditSave,onEditChange,onEditKeyDown,onDelete,onIndent,onOutdent,onContextMenu,icon,badge,depth=0})=>{
   const isPdf=item.mimeType==='application/pdf';
   return(
     <div className={'si'+(isSelected?' active':'')} style={{paddingLeft:(depth*14+8)+'px'}} onClick={e=>onSelect(e,item.id)} onContextMenu={onContextMenu?function(e){onContextMenu(e,item);}:undefined}>
@@ -1368,6 +1451,14 @@ const SidebarItem=memo(({item,isSelected,isEditing,editValue,onSelect,onEditStar
       </span>
       {item.type==='page'&&item.createdAt&&!isEditing&&(
         <span className="si-date">{new Date(item.createdAt).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+      )}
+      {badge&&!isEditing&&badge.open>0&&(
+        <span title={badge.open+' open to-do item'+(badge.open===1?'':'s')+(badge.overdue?', '+badge.overdue+' overdue':'')}
+          style={{fontSize:'10px',fontWeight:700,flexShrink:0,padding:'1px 6px',borderRadius:'8px',fontFamily:'IBM Plex Mono',
+            background:badge.overdue>0?'rgba(239,68,68,0.15)':'var(--accent-glow)',
+            color:badge.overdue>0?'var(--danger)':'var(--accent-2)'}}>
+          {badge.overdue>0?badge.overdue+'!':badge.open}
+        </span>
       )}
       {!isEditing&&(
         <div className="si-actions" onClick={e=>e.stopPropagation()}>
@@ -2143,6 +2234,58 @@ const ImportDestinationModal=({mode,payload,projects,onConfirm,onClose})=>{
   );
 };
 
+// ── Deadlines rollup: everything dated across LoCoNotes + To-Do ─────────────
+const DeadlinesModal=({projects,onNavigate,onClose})=>{
+  const items=useMemo(function(){return gatherDeadlines(projects);},[projects]);
+  const groups=[
+    {label:'Overdue',test:function(d){return d.days<0;},color:'var(--danger)'},
+    {label:'Due Today',test:function(d){return d.days===0;},color:'var(--warn)'},
+    {label:'This Week',test:function(d){return d.days>0&&d.days<=7;},color:'var(--accent-2)'},
+    {label:'Later (60 days)',test:function(d){return d.days>7;},color:'var(--text-3)'}
+  ];
+  const kindIcon=function(k){return k==='todo'?'Check':(k==='event'?'Calendar':'Book');};
+  return(
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{width:'560px'}} onClick={function(e){e.stopPropagation();}}>
+        <div className="modal-header"><span className="modal-title">Upcoming Deadlines</span><button className="rail-btn" onClick={onClose}><I name="X" size={14}/></button></div>
+        <div className="modal-body scr" style={{maxHeight:'70vh',overflowY:'auto'}}>
+          {items.length===0&&(
+            <div style={{textAlign:'center',padding:'24px',color:'var(--text-3)',fontSize:'13px',fontStyle:'italic'}}>Nothing due in the next 60 days.</div>
+          )}
+          {groups.map(function(g){
+            const rows=items.filter(g.test);
+            if(!rows.length)return null;
+            return(
+              <div key={g.label} style={{marginBottom:'16px'}}>
+                <div style={{fontSize:'10px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:g.color,marginBottom:'6px'}}>{g.label} ({rows.length})</div>
+                <div style={{display:'flex',flexDirection:'column',gap:'5px'}}>
+                  {rows.map(function(d,i){
+                    return(
+                      <div key={g.label+i} onClick={function(){onNavigate(d.nav);onClose();}}
+                        style={{display:'flex',alignItems:'center',gap:'10px',padding:'8px 10px',borderRadius:'6px',border:'1px solid var(--border)',background:'var(--surface)',cursor:'pointer'}}
+                        onMouseEnter={function(e){e.currentTarget.style.borderColor='var(--border-2)';}}
+                        onMouseLeave={function(e){e.currentTarget.style.borderColor='var(--border)';}}>
+                        <I name={kindIcon(d.kind)} size={13} style={{color:g.color,flexShrink:0}}/>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:'12.5px',color:'var(--text-1)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.title}</div>
+                          <div style={{fontSize:'10.5px',color:'var(--text-3)',marginTop:'1px'}}>{d.path}</div>
+                        </div>
+                        <span style={{fontSize:'10.5px',fontWeight:600,color:g.color,flexShrink:0}}>
+                          {d.days<0?Math.abs(d.days)+'d overdue':(d.days===0?'today':d.date)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const SettingsModal=({settings,onSave,onClose,projects,onStageImport,onBackupDone})=>{
   const[s,setS]=useState(settings);
   const sectionRef=useRef(null);const pageRef=useRef(null);const jsonRef=useRef(null);
@@ -2694,6 +2837,29 @@ function App(){
     else if(scope==='notebook')updateTree(p=>p.id===selProj?{...p,children:p.children.map(n=>n.id===id?{...n,title:editVal}:n)}:p);
     else updateTree(p=>({...p,children:p.children?.map(n=>({...n,children:n.children?.map(pg=>pg.id===id?{...pg,title:editVal}:pg)}))}));
     setEditingId(null);
+    // Auto-link: a freshly created notebook just got its real name — offer a matching to-do project.
+    if(scope==='notebook'&&pendingAutoLink.current===id){
+      pendingAutoLink.current=null;
+      const nbName=editVal&&editVal.trim()?editVal.trim():'New Notebook';
+      setTimeout(function(){
+        if(window.confirm('Create a matching project "'+nbName+'" in the To-Do app and link it to this notebook?')){
+          const newId=createTodoProject(nbName);
+          if(newId){
+            updateTree(function(p){
+              if(p.id!==selProj)return p;
+              return Object.assign({},p,{children:(p.children||[]).map(function(n){
+                if(n.id!==id)return n;
+                const m=Object.assign({},n.metadata||{},{todoProjectId:newId});
+                return Object.assign({},n,{metadata:m});
+              })});
+            });
+            setTodoTick(function(t){return t+1;});
+          } else {
+            alert('Could not create the to-do project. Open the To-Do tab once, then link manually from the notebook dashboard.');
+          }
+        }
+      },120);
+    }
   };
   const editKeyDown=(e,id,scope)=>{if(e.key==='Enter'){saveEdit(id,scope);}if(e.key==='Escape')setEditingId(null);};
 
@@ -2810,7 +2976,8 @@ function App(){
     setImportStage(null);
   };
 
-  const addNotebook=()=>{if(!activeProject)return;const id='nb_'+Date.now();updateTree(p=>p.id===selProj?{...p,children:[...p.children,{id,type:'notebook',title:'New Notebook',children:[]}]}:p);setSelNote(id);setTimeout(()=>{setEditingId(id);setEditVal('New Notebook');},80);};
+  const pendingAutoLink=useRef(null); // notebook id awaiting the to-do auto-link prompt
+  const addNotebook=()=>{if(!activeProject)return;const id='nb_'+Date.now();updateTree(p=>p.id===selProj?{...p,children:[...p.children,{id,type:'notebook',title:'New Notebook',children:[]}]}:p);setSelNote(id);pendingAutoLink.current=id;setTimeout(()=>{setEditingId(id);setEditVal('New Notebook');},80);};
   const addPage=()=>{if(!activeNotebook)return;const id='pg_'+Date.now();updateTree(p=>({...p,children:p.children?.map(n=>n.id===selNote?{...n,children:[...n.children,{id,type:'page',title:'New Page',content:'',createdAt:Date.now(),level:0}]}:n)}));setSelPage(id);setMobileView('editor');setTimeout(()=>{setEditingId(id);setEditVal('New Page');},80);};
   // Persist the client-group order so manual ordering and empty groups survive reloads.
   const persistClientOrder=(arr)=>{try{idb.putSetting('clientOrder',arr);}catch(e){}};
@@ -2885,20 +3052,40 @@ function App(){
   // Each delete captures the removed item plus enough location info to restore it.
   const[undoState,setUndoState]=useState(null); // {kind,message,payload}
   const[backupTick,setBackupTick]=useState(0); // bump to refresh the backup banner
+  const[todoTick,setTodoTick]=useState(0); // bump when to-do data changes (badges/deadlines)
+  useEffect(function(){
+    const onMsg=function(ev){
+      const d=ev.data||{};
+      if(d.source==='loco-todo'&&d.type==='data-changed'){setTodoTick(function(t){return t+1;});}
+    };
+    window.addEventListener('message',onMsg);
+    return function(){window.removeEventListener('message',onMsg);};
+  },[]);
+  // Open/overdue counts per linked notebook, for sidebar badges.
+  const todoCounts=useMemo(function(){return notebookTodoCounts(projects);},[projects,todoTick]);
 
   // ── Embedded To-Do app ─────────────────────────────────────────────────
   // todo.html lives in the same folder/origin, so it shares localStorage and
   // can be embedded in an iframe rather than opened in a separate window.
-  const[todoView,setTodoView]=useState(null); // null | {projectId: string|null}
-  const openTodo=(projectId)=>{setTodoView({projectId:projectId||null});};
+  const[todoView,setTodoView]=useState(null); // null | {projectId, mode:'dock'|'full', v}
+  const[todoDockW,setTodoDockW]=useState(460);
+  // mode defaults to 'dock' (side-by-side split); v is stamped ONCE at open so the
+  // iframe doesn't remount on unrelated re-renders (a per-render Date.now() here
+  // previously caused the embedded app to reload on every state change).
+  const openTodo=(projectId,mode)=>{setTodoView({projectId:projectId||null,mode:mode||'dock',v:Date.now()});};
   const closeTodo=()=>{setTodoView(null);};
+  const setTodoMode=(mode)=>{setTodoView(function(tv){return tv?Object.assign({},tv,{mode:mode}):tv;});};
+  const startTodoDockResize=(e)=>{
+    e.preventDefault();const startX=e.clientX,startW=todoDockW;
+    const mv=m=>setTodoDockW(Math.max(340,Math.min(900,startW+(startX-m.clientX))));
+    const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
+    document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
+  };
   const todoSrc=(function(){
     if(!todoView)return '';
     let h='#embed=1';
     if(todoView.projectId)h+='&project='+encodeURIComponent(todoView.projectId);
-    // Cache-buster: GitHub Pages' CDN caches for ~10 min and iframes dodge
-    // hard-refresh, so stamp each open with a unique query to force a fresh fetch.
-    return 'todo.html?v='+Date.now()+h;
+    return 'todo.html?v='+todoView.v+h;
   })();
 
   const delProject=(e,id)=>{
@@ -3124,6 +3311,7 @@ function App(){
         <button className={'rail-btn'+(aiOpen?' active':'')} onClick={()=>setAiOpen(o=>!o)}><I name="Sparkles" size={16}/><span className="tooltip">AI Assistant ⌃\</span></button>
         <button className="rail-btn" onClick={()=>setModal('templates')}><I name="Layout" size={16}/><span className="tooltip">Templates</span></button>
         <button className={'rail-btn'+(todoView?' active':'')} onClick={()=>openTodo(null)}><I name="Check" size={16}/><span className="tooltip">To-Do</span></button>
+        <button className="rail-btn" onClick={()=>setModal('deadlines')}><I name="Calendar" size={16}/><span className="tooltip">Deadlines</span></button>
         <div className="rail-divider"/>
         <button className="rail-btn" onClick={()=>setModal('diag')}><I name="Activity" size={16}/><span className="tooltip">Diagnostics</span></button>
         <div className="rail-spacer"/>
@@ -3179,7 +3367,7 @@ function App(){
             </div>
             <div className="panel-body scr">
               {(activeProject?.children||[]).map(n=>(
-                <SidebarItem key={n.id} item={n} icon="📓" isSelected={selNote===n.id} isEditing={editingId===n.id} editValue={editVal}
+                <SidebarItem key={n.id} item={n} icon="📓" badge={todoCounts[n.id]} isSelected={selNote===n.id} isEditing={editingId===n.id} editValue={editVal}
                   onEditChange={setEditVal} onSelect={(e,id)=>selectNotebook(id)} onEditStart={startEdit}
                   onEditSave={id=>saveEdit(id,'notebook')} onEditKeyDown={(e,id)=>editKeyDown(e,id,'notebook')} onDelete={delNotebook}/>
               ))}
@@ -3278,15 +3466,40 @@ function App(){
           <AIPanel projects={projects} selectedProjId={selProj} selectedNoteId={selNote} selectedPageId={selPage}
             settings={settings} onClose={()=>setAiOpen(false)} width={aiWidth} onResizeStart={startAIResize}/>
         )}
+        {/* Docked To-Do panel: side-by-side split with the workspace */}
+        {todoView&&todoView.mode==='dock'&&(
+          <div style={{width:todoDockW+'px',flexShrink:0,display:'flex',flexDirection:'column',borderLeft:'1px solid var(--border)',background:'var(--panel-bg)',position:'relative'}}>
+            <div style={{position:'absolute',left:0,top:0,bottom:0,width:'6px',cursor:'col-resize',zIndex:40}} onMouseDown={startTodoDockResize}/>
+            <div style={{height:'40px',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 8px 0 14px',background:'var(--sidebar-bg)',borderBottom:'1px solid var(--border)'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'8px',minWidth:0}}>
+                <I name="Check" size={14} style={{color:'var(--accent-2)',flexShrink:0}}/>
+                <span style={{fontSize:'12.5px',fontWeight:600,color:'var(--text-1)'}}>To-Do</span>
+                {todoView.projectId&&<span style={{fontSize:'10.5px',color:'var(--text-3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>— linked project</span>}
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:'2px',flexShrink:0}}>
+                {todoView.projectId&&(
+                  <button className="rail-btn" style={{width:'28px',height:'28px'}} title="Show all projects" onClick={()=>setTodoView(function(tv){return Object.assign({},tv,{projectId:null});})}><I name="Layers" size={13}/></button>
+                )}
+                <button className="rail-btn" style={{width:'28px',height:'28px'}} title="Expand to full screen" onClick={()=>setTodoMode('full')}><I name="Maximize" size={13}/></button>
+                <button className="rail-btn" style={{width:'28px',height:'28px'}} title="Close" onClick={closeTodo}><I name="X" size={13}/></button>
+              </div>
+            </div>
+            <iframe key={todoSrc} src={todoSrc} title="To-Do" style={{flex:1,width:'100%',border:'none',background:'#fff'}}/>
+          </div>
+        )}
       </div>
 
       {/* Modals */}
       {modal==='search'&&<SearchOverlay projects={projects} onClose={()=>setModal(null)} onSelect={function(r){setSelProj(r.projId);setSelNote(r.notebookId);setSelPage(r.kind==='task'?null:r.id);setActivePane('primary');setMobileView('editor');setModal(null);}}/>}
       {modal==='settings'&&<SettingsModal key={backupTick} settings={settings} projects={projects} onStageImport={handleStageImport} onBackupDone={()=>setBackupTick(function(t){return t+1;})} onClose={()=>setModal(null)} onSave={s=>{setSettings(s);idb.putSetting('appSettings',s);try{localStorage.setItem('neuronote_settings',JSON.stringify(s));}catch(e){}}}/>}
       {importStage&&<ImportDestinationModal mode={importStage.mode} payload={importStage.payload} projects={projects} onConfirm={handleImportConfirm} onClose={()=>setImportStage(null)}/>}
+      {modal==='deadlines'&&<DeadlinesModal projects={projects} onClose={()=>setModal(null)} onNavigate={function(nav){
+        if(nav.type==='notebook'){setSelProj(nav.projId);setSelNote(nav.nbId);setSelPage(null);}
+        else if(nav.type==='todo'){openTodo(nav.projectId);}
+      }}/>}
       {ctxMenu&&<ProjectContextMenu x={ctxMenu.x} y={ctxMenu.y} project={ctxMenu.project} clients={clients} onMove={moveProjectToClient} onClose={()=>setCtxMenu(null)}/>}
       {undoState&&<UndoToast message={undoState.message} onUndo={performUndo} onDismiss={()=>setUndoState(null)}/>}
-      {todoView&&(
+      {todoView&&todoView.mode==='full'&&(
         <div style={{position:'fixed',inset:0,zIndex:9998,background:'var(--panel-bg)',display:'flex',flexDirection:'column'}}>
           <div style={{height:'44px',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 12px 0 16px',background:'var(--sidebar-bg)',borderBottom:'1px solid var(--border)'}}>
             <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
@@ -3298,8 +3511,9 @@ function App(){
             </div>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
               {todoView.projectId&&(
-                <button className="btn btn-ghost btn-sm" onClick={()=>setTodoView({projectId:null})}>Show all projects</button>
+                <button className="btn btn-ghost btn-sm" onClick={()=>setTodoView(function(tv){return Object.assign({},tv,{projectId:null});})}>Show all projects</button>
               )}
+              <button className="btn btn-ghost btn-sm" onClick={()=>setTodoMode('dock')} title="Dock to side for split view">Split view</button>
               <button className="rail-btn" onClick={closeTodo} title="Close"><I name="X" size={15}/></button>
             </div>
           </div>
