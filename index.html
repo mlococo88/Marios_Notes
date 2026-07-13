@@ -258,7 +258,7 @@ canvas.pdf-page{box-shadow:0 4px 16px rgba(0,0,0,0.15);margin-bottom:16px;displa
 <body>
 <div id="root"></div>
 <script type="text/babel">
-console.log("[LoCoNotes] build 2026-07-13.6");
+console.log("[LoCoNotes] build 2026-07-13.7");
 const {useState,useEffect,useMemo,useRef,useCallback,memo,createContext,useContext}=React;
 const APP_VER='2.0.0';
 const DB_NAME='LoCoNotesV2';
@@ -979,7 +979,18 @@ const PdfViewer=memo(({pageData})=>{
 });
 
 // ── Project Calendar ───────────────────────────────────────────────────────
-const ProjectCalendar=({project,onUpdate})=>{ // 'project' may be a project OR a notebook node
+const ProjectCalendar=({project,onUpdate,todoProjectId,onCreateTodo,todoRefresh})=>{ // 'project' may be a project OR a notebook node
+  // Open items from the LINKED to-do project appear on this same grid, so a task's
+  // schedule shows its deliverables/QC events AND its to-do items in one view.
+  const todoItems=useMemo(function(){
+    if(!todoProjectId)return [];
+    var all=readTodoProjects();
+    var tp=null;
+    for(var i=0;i<all.length;i++){ if(String(all[i].id)===String(todoProjectId)){tp=all[i];break;} }
+    if(!tp)return [];
+    return (tp.tasks||[]).filter(function(t){return !t.completedDate&&t.due;});
+  },[todoProjectId,todoRefresh]);
+  const[todoDraft,setTodoDraft]=useState({desc:'',priority:'medium'});
   const[cur,setCur]=useState(new Date());
   const[modal,setModal]=useState(null);
   const[newEv,setNewEv]=useState({title:'',type:'Deliverable'});
@@ -1022,11 +1033,26 @@ const ProjectCalendar=({project,onUpdate})=>{ // 'project' may be a project OR a
                   <div key={ev.id} className="cal-event" style={{background:tc[ev.type]?.bg||tc.Other.bg,color:tc[ev.type]?.color||tc.Other.color}}
                     onClick={e=>{e.stopPropagation();delEvent(ev.id);}} title={ev.title+' (click to delete)'}>{ev.title}</div>
                 ))}
+                {todoItems.filter(function(t){return t.due===ds;}).map(function(t){
+                  var pc={high:{bg:'rgba(239,68,68,0.15)',color:'#dc2626'},medium:{bg:'rgba(245,158,11,0.15)',color:'#f59e0b'},low:{bg:'rgba(100,116,139,0.15)',color:'#64748b'}};
+                  var st=pc[t.priority]||pc.low;
+                  return(
+                    <div key={'td'+t.id} className="cal-event" style={{background:st.bg,color:st.color,borderLeft:'2px solid '+st.color}}
+                      onClick={function(e){e.stopPropagation();}} title={'To-do: '+t.desc+' ('+(t.priority||'low')+' priority)'}>
+                      ☑ {t.desc}
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
         </div>
         <div style={{display:'flex',flexWrap:'wrap',gap:'8px',marginTop:'16px',paddingTop:'12px',borderTop:'1px solid var(--border)'}}>
+          {todoProjectId&&(
+            <div style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'10px',color:'var(--text-3)'}}>
+              <span style={{color:'#f59e0b',fontWeight:700}}>☑</span> To-do (linked project)
+            </div>
+          )}
           {Object.entries(tc).map(([k,v])=>(
             <span key={k} style={{display:'inline-flex',alignItems:'center',gap:'4px',fontSize:'10px',color:v.color}}>
               <span style={{width:'8px',height:'8px',borderRadius:'50%',background:v.bg,border:'1px solid '+v.color,display:'inline-block'}}/>{k}
@@ -1037,7 +1063,7 @@ const ProjectCalendar=({project,onUpdate})=>{ // 'project' may be a project OR a
       {modal&&(
         <div className="modal-overlay" onClick={()=>setModal(null)}>
           <div className="modal-box" style={{width:'340px'}} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header"><span className="modal-title">Add Event — {modal}</span><button className="rail-btn" onClick={()=>setModal(null)}><I name="X" size={14}/></button></div>
+            <div className="modal-header"><span className="modal-title">{modal}</span><button className="rail-btn" onClick={()=>setModal(null)}><I name="X" size={14}/></button></div>
             <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:'12px'}}>
               <div><label className="form-label">Event Title</label><input autoFocus className="form-input" value={newEv.title} onChange={e=>setNewEv({...newEv,title:e.target.value})} onKeyDown={e=>e.key==='Enter'&&addEvent()} placeholder="Milestone or event description..."/></div>
               <div><label className="form-label">Type</label>
@@ -1046,7 +1072,33 @@ const ProjectCalendar=({project,onUpdate})=>{ // 'project' may be a project OR a
                 </select>
               </div>
             </div>
-            <div className="modal-footer"><button className="btn btn-ghost btn-sm" onClick={()=>setModal(null)}>Cancel</button><button className="btn btn-primary btn-sm" onClick={addEvent}>Add Event</button></div>
+            {todoProjectId&&onCreateTodo&&(
+              <div style={{padding:'0 16px 4px'}}>
+                <div style={{fontSize:'10px',fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.08em',margin:'4px 0 10px',paddingTop:'12px',borderTop:'1px solid var(--border)'}}>Or add a to-do item</div>
+                <div style={{display:'flex',gap:'8px'}}>
+                  <input className="form-input" style={{flex:1}} value={todoDraft.desc} placeholder="To-do description..."
+                    onChange={function(e){setTodoDraft(Object.assign({},todoDraft,{desc:e.target.value}));}}/>
+                  <select className="form-select" style={{width:'100px'}} value={todoDraft.priority}
+                    onChange={function(e){setTodoDraft(Object.assign({},todoDraft,{priority:e.target.value}));}}>
+                    <option value="high">High</option>
+                    <option value="medium">Med</option>
+                    <option value="low">Low</option>
+                  </select>
+                </div>
+              </div>
+            )}
+            <div className="modal-footer" style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setModal(null)}>Cancel</button>
+              {todoProjectId&&onCreateTodo&&(
+                <button className="btn btn-ghost btn-sm" onClick={function(){
+                  if(!todoDraft.desc.trim()){alert('Enter a to-do description.');return;}
+                  var okc=onCreateTodo(todoProjectId,todoDraft.desc.trim(),modal,todoDraft.priority);
+                  if(okc){setTodoDraft({desc:'',priority:'medium'});setModal(null);}
+                  else alert('Could not create the to-do item.');
+                }}>Add To-Do</button>
+              )}
+              <button className="btn btn-primary btn-sm" onClick={addEvent}>Add Event</button>
+            </div>
           </div>
         </div>
       )}
@@ -1312,7 +1364,13 @@ const NotebookDashboard=({notebook,onUpdate,onOpenTodo})=>{
           </button>
         ))}
       </div>
-      {tab==='schedule'?<ProjectCalendar project={notebook} onUpdate={(id,m,ev)=>onUpdate(id,m,ev)}/>:(
+      {tab==='schedule'?<ProjectCalendar project={notebook} onUpdate={(id,m,ev)=>onUpdate(id,m,ev)}
+        todoProjectId={meta.todoProjectId} todoRefresh={todoRefresh}
+        onCreateTodo={function(pid,desc,due,pri){
+          var okc=createTodoTask(pid,desc,due,pri);
+          if(okc)setTodoRefresh(function(n){return n+1;});
+          return okc;
+        }}/>:(
         <div style={{flex:1,overflowY:'auto',padding:'24px'}} className="scr">
           <div style={{maxWidth:'800px',margin:'0 auto',display:'flex',flexDirection:'column',gap:'16px'}}>
             <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px'}}>
