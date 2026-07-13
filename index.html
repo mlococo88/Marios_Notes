@@ -107,6 +107,12 @@ body{font-family:'IBM Plex Sans',system-ui,sans-serif;-webkit-font-smoothing:ant
 .resizer{position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:20;display:flex;align-items:center;justify-content:center}
 .resizer::after{content:'';display:block;width:2px;height:32px;background:var(--border-2);border-radius:1px;transition:all 0.15s}
 .resizer:hover::after,.resizer.dragging::after{background:var(--accent);height:48px}
+.resizer-left{position:absolute;left:-5px;top:0;bottom:0;width:10px;cursor:col-resize;z-index:45;display:flex;align-items:center;justify-content:center}
+.resizer-left::after{content:'';display:block;width:3px;height:40px;background:var(--border-2);border-radius:2px;transition:all 0.15s}
+.resizer-left:hover::after,.resizer-left.dragging::after{background:var(--accent);height:64px;width:4px}
+.resizer-left:hover{background:linear-gradient(90deg,transparent,var(--accent-glow))}
+body.col-resizing{cursor:col-resize!important;user-select:none!important}
+body.col-resizing iframe{pointer-events:none}
 .editor-canvas{background:var(--canvas-bg);padding:24px;overflow-y:auto;flex:1}
 .page-sheet{background:var(--page-bg);box-shadow:var(--page-shadow);margin:0 auto;padding:72px 80px;min-height:11in;width:8.5in;position:relative;border-radius:2px}
 .page-title-input{width:100%;font-family:'IBM Plex Sans',sans-serif;font-size:28px;font-weight:600;color:#0f172a;border:none;outline:none;background:transparent;padding:0;margin:0 0 6px 0;line-height:1.2}
@@ -258,7 +264,7 @@ canvas.pdf-page{box-shadow:0 4px 16px rgba(0,0,0,0.15);margin-bottom:16px;displa
 <body>
 <div id="root"></div>
 <script type="text/babel">
-console.log("[LoCoNotes] build 2026-07-13.7");
+console.log("[LoCoNotes] build 2026-07-13.9");
 const {useState,useEffect,useMemo,useRef,useCallback,memo,createContext,useContext}=React;
 const APP_VER='2.0.0';
 const DB_NAME='LoCoNotesV2';
@@ -3424,11 +3430,46 @@ function App(){
   const openTodo=(projectId,mode)=>{setTodoView({projectId:projectId||null,mode:mode||'dock',v:Date.now()});};
   const closeTodo=()=>{setTodoView(null);};
   const setTodoMode=(mode)=>{setTodoView(function(tv){return tv?Object.assign({},tv,{mode:mode}):tv;});};
+  const[todoDragging,setTodoDragging]=useState(false);
+  const todoPanelRef=useRef(null);
   const startTodoDockResize=(e)=>{
-    e.preventDefault();const startX=e.clientX,startW=todoDockW;
-    const mv=m=>setTodoDockW(Math.max(340,Math.min(900,startW+(startX-m.clientX))));
-    const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
-    document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
+    e.preventDefault();
+    const startX=e.clientX;
+    const panel=todoPanelRef.current;
+    if(!panel)return;
+    const startW=panel.offsetWidth;
+    let latest=startW;
+    let frame=null;
+
+    setTodoDragging(true);
+    document.body.classList.add('col-resizing');
+
+    const clamp=function(w){
+      const max=Math.min(900,window.innerWidth-360);
+      return Math.max(340,Math.min(max,w));
+    };
+    // Write straight to the DOM node — no React state during the drag.
+    // Previously every mousemove called setState, re-rendering the whole app
+    // (and the iframe container) ~60x/sec, which is what made it stutter.
+    const apply=function(){
+      frame=null;
+      panel.style.width=latest+'px';
+    };
+    const mv=function(m){
+      latest=clamp(startW+(startX-m.clientX));
+      if(frame===null)frame=requestAnimationFrame(apply); // coalesce to one write per frame
+    };
+    const up=function(){
+      if(frame!==null){cancelAnimationFrame(frame);frame=null;}
+      panel.style.width=latest+'px';
+      setTodoDragging(false);
+      document.body.classList.remove('col-resizing');
+      document.removeEventListener('mousemove',mv);
+      document.removeEventListener('mouseup',up);
+      setTodoDockW(latest); // commit once, at the end
+    };
+    document.addEventListener('mousemove',mv);
+    document.addEventListener('mouseup',up);
   };
   const todoSrc=(function(){
     if(!todoView)return '';
@@ -3533,21 +3574,59 @@ function App(){
 
   // Resizers
   const startPanelResize=(e,panel)=>{
-    e.preventDefault();const startX=e.clientX,startW=panelW[panel];
-    const mv=m=>setPanelW(prev=>({...prev,[panel]:Math.max(140,Math.min(480,startW+m.clientX-startX))}));
-    const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
+    e.preventDefault();
+    const startX=e.clientX,startW=panelW[panel];
+    let frame=null,latest=startW;
+    document.body.classList.add('col-resizing');
+    const apply=function(){frame=null;setPanelW(prev=>Object.assign({},prev,{[panel]:latest}));};
+    const mv=function(m){
+      latest=Math.max(140,Math.min(480,startW+m.clientX-startX));
+      if(frame===null)frame=requestAnimationFrame(apply); // one update per frame, not per event
+    };
+    const up=function(){
+      if(frame!==null)cancelAnimationFrame(frame);
+      setPanelW(prev=>Object.assign({},prev,{[panel]:latest}));
+      document.body.classList.remove('col-resizing');
+      document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);
+    };
     document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
   };
   const startAIResize=(e)=>{
-    e.preventDefault();const startX=e.clientX,startW=aiWidth;
-    const mv=m=>setAiWidth(Math.max(300,Math.min(700,startW+(startX-m.clientX))));
-    const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
+    e.preventDefault();
+    const startX=e.clientX,startW=aiWidth;
+    let frame=null,latest=startW;
+    document.body.classList.add('col-resizing');
+    const apply=function(){frame=null;setAiWidth(latest);};
+    const mv=function(m){
+      latest=Math.max(300,Math.min(700,startW+(startX-m.clientX)));
+      if(frame===null)frame=requestAnimationFrame(apply);
+    };
+    const up=function(){
+      if(frame!==null)cancelAnimationFrame(frame);
+      setAiWidth(latest);
+      document.body.classList.remove('col-resizing');
+      document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);
+    };
     document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
   };
   const startSplitResize=(e)=>{
-    e.preventDefault();const container=e.currentTarget.parentElement;const startX=e.clientX,startR=splitRatio;
-    const mv=m=>{const dx=(m.clientX-startX)/container.offsetWidth*100;setSplitRatio(Math.max(20,Math.min(80,startR+dx)));};
-    const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
+    e.preventDefault();
+    const container=e.currentTarget.parentElement;
+    const startX=e.clientX,startR=splitRatio;
+    let frame=null,latest=startR;
+    document.body.classList.add('col-resizing');
+    const apply=function(){frame=null;setSplitRatio(latest);};
+    const mv=function(m){
+      const dx=(m.clientX-startX)/container.offsetWidth*100;
+      latest=Math.max(20,Math.min(80,startR+dx));
+      if(frame===null)frame=requestAnimationFrame(apply);
+    };
+    const up=function(){
+      if(frame!==null)cancelAnimationFrame(frame);
+      setSplitRatio(latest);
+      document.body.classList.remove('col-resizing');
+      document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);
+    };
     document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
   };
 
@@ -3818,8 +3897,8 @@ function App(){
         )}
         {/* Docked To-Do panel: side-by-side split with the workspace */}
         {todoView&&todoView.mode==='dock'&&(
-          <div style={{width:todoDockW+'px',flexShrink:0,display:'flex',flexDirection:'column',borderLeft:'1px solid var(--border)',background:'var(--panel-bg)',position:'relative'}}>
-            <div style={{position:'absolute',left:0,top:0,bottom:0,width:'6px',cursor:'col-resize',zIndex:40}} onMouseDown={startTodoDockResize}/>
+          <div ref={todoPanelRef} style={{width:todoDockW+'px',flexShrink:0,display:'flex',flexDirection:'column',borderLeft:'1px solid var(--border)',background:'var(--panel-bg)',position:'relative'}}>
+            <div className={'resizer-left'+(todoDragging?' dragging':'')} onMouseDown={startTodoDockResize} title="Drag to resize"/>
             <div style={{height:'40px',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 8px 0 14px',background:'var(--sidebar-bg)',borderBottom:'1px solid var(--border)'}}>
               <div style={{display:'flex',alignItems:'center',gap:'8px',minWidth:0}}>
                 <I name="Check" size={14} style={{color:'var(--accent-2)',flexShrink:0}}/>
