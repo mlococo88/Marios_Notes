@@ -264,7 +264,7 @@ canvas.pdf-page{box-shadow:0 4px 16px rgba(0,0,0,0.15);margin-bottom:16px;displa
 <body>
 <div id="root"></div>
 <script type="text/babel">
-console.log("[LoCoNotes] build 2026-07-13.10");
+console.log("[LoCoNotes] build 2026-07-13.11");
 const {useState,useEffect,useMemo,useRef,useCallback,memo,createContext,useContext}=React;
 const APP_VER='2.0.0';
 const DB_NAME='LoCoNotesV2';
@@ -996,10 +996,14 @@ const ProjectCalendar=({project,onUpdate,todoProjectId,onCreateTodo,todoRefresh}
     if(!tp)return [];
     return (tp.tasks||[]).filter(function(t){return !t.completedDate&&t.due;});
   },[todoProjectId,todoRefresh]);
-  const[todoDraft,setTodoDraft]=useState({desc:'',priority:'medium'});
+  const blankDraft=function(){return {desc:'',type:'task',priority:'medium',status:'active',
+    hours:'',assignee:'',tag:'',ref:'',url:'',notes:''};};
+  const[todoDraft,setTodoDraft]=useState(blankDraft());
+  const dset=function(k,v){setTodoDraft(function(d){return Object.assign({},d,{[k]:v});});};
   const[cur,setCur]=useState(new Date());
   const[modal,setModal]=useState(null);
-  const[newEv,setNewEv]=useState({title:'',type:'Deliverable'});
+  // Legacy LoCoNotes events still render and can be deleted; new items are created
+  // in the linked To-Do project via the unified dialog below.
   const events=project.events||[];
   const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
   const today=new Date();
@@ -1008,7 +1012,6 @@ const ProjectCalendar=({project,onUpdate,todoProjectId,onCreateTodo,todoRefresh}
   const dim=(d)=>new Date(d.getFullYear(),d.getMonth()+1,0).getDate();
   const fd=(d)=>new Date(d.getFullYear(),d.getMonth(),1).getDay();
   const tc={Deliverable:{bg:'rgba(239,68,68,0.15)',color:'#dc2626'},'Field Visit':{bg:'rgba(16,185,129,0.15)',color:'#10b981'},QC:{bg:'rgba(245,158,11,0.15)',color:'#f59e0b'},Meeting:{bg:'rgba(37,99,235,0.15)',color:'#3b82f6'},Other:{bg:'rgba(100,116,139,0.15)',color:'#94a3b8'}};
-  const addEvent=()=>{if(!newEv.title||!modal)return;onUpdate(project.id,{...project.metadata},[...events,{...newEv,id:Date.now(),date:modal}]);setModal(null);setNewEv({title:'',type:'Deliverable'});};
   const delEvent=(id)=>{if(confirm('Delete event?'))onUpdate(project.id,{...project.metadata},events.filter(e=>e.id!==id));};
   const blanks=Array(fd(cur)).fill(null);
   const days=Array.from({length:dim(cur)},(_,i)=>i+1);
@@ -1040,11 +1043,14 @@ const ProjectCalendar=({project,onUpdate,todoProjectId,onCreateTodo,todoRefresh}
                     onClick={e=>{e.stopPropagation();delEvent(ev.id);}} title={ev.title+' (click to delete)'}>{ev.title}</div>
                 ))}
                 {todoItems.filter(function(t){return t.due===ds;}).map(function(t){
-                  var pc={high:{bg:'rgba(239,68,68,0.15)',color:'#dc2626'},medium:{bg:'rgba(245,158,11,0.15)',color:'#f59e0b'},low:{bg:'rgba(100,116,139,0.15)',color:'#64748b'}};
-                  var st=pc[t.priority]||pc.low;
+                  var col=TODO_TYPE_COLORS[t.type||'task']||'#64748b';
+                  var pri={high:'#dc2626',medium:'#f59e0b',low:'#94a3b8'}[t.priority||'medium'];
+                  var label=(TODO_TYPES.filter(function(x){return x.v===(t.type||'task');})[0]||{}).label||'Task';
                   return(
-                    <div key={'td'+t.id} className="cal-event" style={{background:st.bg,color:st.color,borderLeft:'2px solid '+st.color}}
-                      onClick={function(e){e.stopPropagation();}} title={'To-do: '+t.desc+' ('+(t.priority||'low')+' priority)'}>
+                    <div key={'td'+t.id} className="cal-event"
+                      style={{background:col+'26',color:col,borderLeft:'3px solid '+pri}}
+                      onClick={function(e){e.stopPropagation();}}
+                      title={label+': '+t.desc+'\n'+(t.priority||'medium')+' priority'+(t.assignee?' · @'+t.assignee:'')}>
                       ☑ {t.desc}
                     </div>
                   );
@@ -1068,42 +1074,99 @@ const ProjectCalendar=({project,onUpdate,todoProjectId,onCreateTodo,todoRefresh}
       </div>
       {modal&&(
         <div className="modal-overlay" onClick={()=>setModal(null)}>
-          <div className="modal-box" style={{width:'340px'}} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header"><span className="modal-title">{modal}</span><button className="rail-btn" onClick={()=>setModal(null)}><I name="X" size={14}/></button></div>
-            <div className="modal-body" style={{display:'flex',flexDirection:'column',gap:'12px'}}>
-              <div><label className="form-label">Event Title</label><input autoFocus className="form-input" value={newEv.title} onChange={e=>setNewEv({...newEv,title:e.target.value})} onKeyDown={e=>e.key==='Enter'&&addEvent()} placeholder="Milestone or event description..."/></div>
-              <div><label className="form-label">Type</label>
-                <select className="form-select" value={newEv.type} onChange={e=>setNewEv({...newEv,type:e.target.value})}>
-                  {Object.keys(tc).map(t=><option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
+          <div className="modal-box" style={{width:'560px',maxWidth:'95vw'}} onClick={e=>e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Add Item — {modal}</span>
+              <button className="rail-btn" onClick={()=>setModal(null)}><I name="X" size={14}/></button>
             </div>
-            {todoProjectId&&onCreateTodo&&(
-              <div style={{padding:'0 16px 4px'}}>
-                <div style={{fontSize:'10px',fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.08em',margin:'4px 0 10px',paddingTop:'12px',borderTop:'1px solid var(--border)'}}>Or add a to-do item</div>
-                <div style={{display:'flex',gap:'8px'}}>
-                  <input className="form-input" style={{flex:1}} value={todoDraft.desc} placeholder="To-do description..."
-                    onChange={function(e){setTodoDraft(Object.assign({},todoDraft,{desc:e.target.value}));}}/>
-                  <select className="form-select" style={{width:'100px'}} value={todoDraft.priority}
-                    onChange={function(e){setTodoDraft(Object.assign({},todoDraft,{priority:e.target.value}));}}>
-                    <option value="high">High</option>
-                    <option value="medium">Med</option>
-                    <option value="low">Low</option>
-                  </select>
+            <div className="modal-body scr" style={{display:'flex',flexDirection:'column',gap:'12px',maxHeight:'62vh',overflowY:'auto'}}>
+              {!todoProjectId?(
+                <div style={{fontSize:'12.5px',color:'var(--text-2)',lineHeight:1.6}}>
+                  This notebook isn't linked to a to-do project yet. Link one on the Overview tab, and scheduled items will be created there.
                 </div>
-              </div>
-            )}
+              ):(
+                <div style={{display:'flex',flexDirection:'column',gap:'12px'}}>
+                  <div>
+                    <label className="form-label">Description</label>
+                    <input autoFocus className="form-input" value={todoDraft.desc}
+                      placeholder="What needs doing?"
+                      onChange={function(e){dset('desc',e.target.value);}}/>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'10px'}}>
+                    <div>
+                      <label className="form-label">Type</label>
+                      <select className="form-select" value={todoDraft.type} onChange={function(e){dset('type',e.target.value);}}>
+                        {TODO_TYPES.map(function(t){return <option key={t.v} value={t.v}>{t.label}</option>;})}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Priority</label>
+                      <select className="form-select" value={todoDraft.priority} onChange={function(e){dset('priority',e.target.value);}}>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Status</label>
+                      <select className="form-select" value={todoDraft.status} onChange={function(e){dset('status',e.target.value);}}>
+                        <option value="active">Active</option>
+                        <option value="done">Done</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+                    <div>
+                      <label className="form-label">Assignee</label>
+                      <input className="form-input" value={todoDraft.assignee} placeholder="Name"
+                        onChange={function(e){dset('assignee',e.target.value);}}/>
+                    </div>
+                    <div>
+                      <label className="form-label">Hours Est.</label>
+                      <input className="form-input" value={todoDraft.hours} placeholder="e.g. 4"
+                        onChange={function(e){dset('hours',e.target.value);}}/>
+                    </div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+                    <div>
+                      <label className="form-label">Tags</label>
+                      <input className="form-input" value={todoDraft.tag} placeholder="RFI, Design..."
+                        onChange={function(e){dset('tag',e.target.value);}}/>
+                    </div>
+                    <div>
+                      <label className="form-label">Ref</label>
+                      <input className="form-input" value={todoDraft.ref} placeholder="Dwg S-101"
+                        onChange={function(e){dset('ref',e.target.value);}}/>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="form-label">URL</label>
+                    <input className="form-input" value={todoDraft.url} placeholder="https://..."
+                      onChange={function(e){dset('url',e.target.value);}}/>
+                  </div>
+                  <div>
+                    <label className="form-label">Notes</label>
+                    <textarea className="form-input" style={{width:'100%',minHeight:'70px',resize:'vertical',fontFamily:'IBM Plex Sans',lineHeight:1.5}}
+                      value={todoDraft.notes} placeholder="Context, scope, follow-ups..."
+                      onChange={function(e){dset('notes',e.target.value);}}/>
+                  </div>
+                  <div style={{fontSize:'11px',color:'var(--text-3)',lineHeight:1.5,paddingTop:'2px'}}>
+                    Due date is set to <strong style={{color:'var(--text-2)'}}>{modal}</strong>. This item is created in the linked To-Do project and appears here on the schedule.
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="modal-footer" style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
               <button className="btn btn-ghost btn-sm" onClick={()=>setModal(null)}>Cancel</button>
               {todoProjectId&&onCreateTodo&&(
-                <button className="btn btn-ghost btn-sm" onClick={function(){
-                  if(!todoDraft.desc.trim()){alert('Enter a to-do description.');return;}
-                  var okc=onCreateTodo(todoProjectId,todoDraft.desc.trim(),modal,todoDraft.priority);
-                  if(okc){setTodoDraft({desc:'',priority:'medium'});setModal(null);}
-                  else alert('Could not create the to-do item.');
-                }}>Add To-Do</button>
+                <button className="btn btn-primary btn-sm" onClick={function(){
+                  if(!todoDraft.desc.trim()){alert('Enter a description.');return;}
+                  var fields=Object.assign({},todoDraft,{desc:todoDraft.desc.trim(),due:modal});
+                  var okc=onCreateTodo(todoProjectId,fields);
+                  if(okc){setTodoDraft(blankDraft());setModal(null);}
+                  else alert('Could not create the item. Open the To-Do tab once, then try again.');
+                }}>Add Item</button>
               )}
-              <button className="btn btn-primary btn-sm" onClick={addEvent}>Add Event</button>
             </div>
           </div>
         </div>
@@ -1112,7 +1175,7 @@ const ProjectCalendar=({project,onUpdate,todoProjectId,onCreateTodo,todoRefresh}
   );
 };
 
-// ── Project Dashboard ──────────────────────────────────────────────────────
+// ── Project Dashboard// ── Project Dashboard ──────────────────────────────────────────────────────
 // ── To-Do app integration (same-origin localStorage bridge) ─────────────────
 // The to-do app (todo.html) stores its data in localStorage on the SAME origin.
 // We read it directly. This is a read-only coupling on a key we do not own:
@@ -1156,9 +1219,10 @@ function createTodoProject(name){
   }catch(e){console.warn('createTodoProject failed:',e);return null;}
 }
 
-// Create a task inside an existing to-do project. Returns true on success.
-// Task shape mirrors what the to-do app itself writes (see its saveEdit).
-function createTodoTask(projectId, desc, dueDate, priority){
+// Create a task inside an existing to-do project, with the FULL field set the
+// to-do app itself writes. `fields` mirrors that app's task shape exactly, so a
+// task created here opens and edits cleanly over there.
+function createTodoTask(projectId, fields){
   try{
     var raw=localStorage.getItem(TODO_KEY);
     var arr=raw?JSON.parse(raw):[];
@@ -1169,25 +1233,45 @@ function createTodoTask(projectId, desc, dueDate, priority){
     }
     if(!p)return false;
     if(!p.tasks)p.tasks=[];
+    var f=fields||{};
     var today=new Date();
     var iso=function(d){
       return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     };
     p.tasks.push({
-      id:'t_'+Date.now(),           // string id — to-do app's sameId() handles it
-      desc:desc||'New task',
-      initiated:iso(today),
-      due:dueDate||iso(today),
-      priority:priority||'medium',
-      status:'active',
-      type:'task',
-      hours:'', assignee:'', tag:'', ref:'', url:'',
+      id:'t_'+Date.now(),
+      desc:f.desc||'New task',
+      type:f.type||'task',
+      priority:f.priority||'medium',
+      status:f.status||'active',
+      initiated:f.initiated||iso(today),
+      due:f.due||iso(today),
+      completedDate:f.status==='done'?(f.completedDate||iso(today)):null,
+      hours:f.hours||'',
+      assignee:f.assignee||'',
+      tag:f.tag||'',
+      ref:f.ref||'',
+      url:f.url||'',
+      notes:f.notes||'',
       subtasks:[], comments:[]
     });
     localStorage.setItem(TODO_KEY,JSON.stringify(arr));
     return true;
   }catch(e){console.warn('createTodoTask failed:',e);return false;}
 }
+
+// Shared vocabulary with the to-do app (keep in sync with its dropdowns).
+var TODO_TYPES=[
+  {v:'task',label:'Task'},
+  {v:'deliverable',label:'Deliverable'},
+  {v:'meeting',label:'Meeting'},
+  {v:'site_visit',label:'Site Visit'},
+  {v:'qc_review',label:'QC Review'}
+];
+var TODO_TYPE_COLORS={
+  task:'#64748b', deliverable:'#dc2626', meeting:'#3b82f6',
+  site_visit:'#10b981', qc_review:'#f59e0b'
+};
 
 // Badge counts per notebook: {nbId: {open, overdue}} from linked to-do projects.
 function notebookTodoCounts(projects){
@@ -1372,8 +1456,8 @@ const NotebookDashboard=({notebook,onUpdate,onOpenTodo})=>{
       </div>
       {tab==='schedule'?<ProjectCalendar project={notebook} onUpdate={(id,m,ev)=>onUpdate(id,m,ev)}
         todoProjectId={meta.todoProjectId} todoRefresh={todoRefresh}
-        onCreateTodo={function(pid,desc,due,pri){
-          var okc=createTodoTask(pid,desc,due,pri);
+        onCreateTodo={function(pid,fields){
+          var okc=createTodoTask(pid,fields);
           if(okc)setTodoRefresh(function(n){return n+1;});
           return okc;
         }}/>:(
@@ -3942,7 +4026,7 @@ function App(){
       {modal==='calendar'&&<MasterCalendar projects={projects} refreshKey={todoTick} onClose={()=>setModal(null)}
         onNavigate={handleDatedNav}
         onCreateTodo={function(projectId,desc,due,priority){
-          const ok=createTodoTask(projectId,desc,due,priority);
+          const ok=createTodoTask(projectId,{desc:desc,due:due,priority:priority});
           if(ok)setTodoTick(function(t){return t+1;}); // refresh badges/calendar
           return ok;
         }}/>}
