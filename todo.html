@@ -516,7 +516,7 @@
         let compactMode = false;
 
         const AppData = { PROJECTS: 'projectTrackerData_v4', META: 'projectTrackerMeta_v4', LAST: 'projectTrackerLastSave_v4' };
-        console.log("[ToDo] build 2026-07-13.5");
+        console.log("[ToDo] build 2026-07-13.6");
 
         // Robust ID matching: project/task IDs may be numbers OR strings depending
         // on how they were created (literal, Date.now(), JSON round-trip, import).
@@ -596,10 +596,27 @@
             }
             
             // Sanitize and init filters
+            let repairedIds = 0;
+            const seenTaskIds = new Set();
+            const seenProjIds = new Set();
             data.projects.forEach(p => {
                 if (!p.color) p.color = '#3b82f6';
                 if (!p.tasks) p.tasks = [];
+                // REPAIR: a previous bug seeded the id counter with NaN (Math.max over a
+                // string id). NaN serializes to JSON as null, so anything created while
+                // it was poisoned was stored with id:null and is unreachable. Give those
+                // records real ids, and de-duplicate any collisions.
+                if (p.id === null || p.id === undefined || p.id === '' || seenProjIds.has(String(p.id))) {
+                    p.id = 'p_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+                    repairedIds++;
+                }
+                seenProjIds.add(String(p.id));
                 p.tasks.forEach(t => {
+                    if (t.id === null || t.id === undefined || t.id === '' || seenTaskIds.has(String(t.id))) {
+                        t.id = 't_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+                        repairedIds++;
+                    }
+                    seenTaskIds.add(String(t.id));
                     if (!t.subtasks) t.subtasks = [];
                     if (!t.comments) t.comments = [];
                     if (!t.tag) t.tag = '';
@@ -609,6 +626,13 @@
                 });
                 calendarFilters[p.id] = true;
             });
+            if (repairedIds > 0) {
+                console.warn('[ToDo] Repaired ' + repairedIds + ' record(s) with missing/duplicate ids.');
+                // Persist immediately so the repair survives, even if nothing else changes.
+                try {
+                    localStorage.setItem(AppData.PROJECTS, JSON.stringify(data.projects));
+                } catch (e) { console.error('Could not persist id repair:', e); }
+            }
             
             // Only NUMERIC ids participate in counter seeding. Externally created
             // items (e.g. from LoCoNotes) use string ids like 't_123'/'p_123';
