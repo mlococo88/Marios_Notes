@@ -516,7 +516,7 @@
         let compactMode = false;
 
         const AppData = { PROJECTS: 'projectTrackerData_v4', META: 'projectTrackerMeta_v4', LAST: 'projectTrackerLastSave_v4' };
-        console.log("[ToDo] build 2026-07-13.6");
+        console.log("[ToDo] build 2026-07-13.7");
 
         // Robust ID matching: project/task IDs may be numbers OR strings depending
         // on how they were created (literal, Date.now(), JSON round-trip, import).
@@ -1398,7 +1398,7 @@
 
             // Populate Project Mover (Default to current)
             const mover = document.getElementById('edit-move-project');
-            mover.innerHTML = data.projects.filter(p=>!p.archived).map(p => `<option value="${p.id}" ${p.id === pid ? 'selected' : ''}>${p.name}</option>`).join('');
+            mover.innerHTML = data.projects.filter(p=>!p.archived).map(p => `<option value="${p.id}" ${sameId(p.id, pid) ? 'selected' : ''}>${p.name}</option>`).join('');
 
             document.getElementById('edit-modal').style.display = 'flex';
             document.getElementById('edit-desc').focus();
@@ -1463,7 +1463,7 @@
 
             // Populate Project Mover
             const mover = document.getElementById('edit-move-project');
-            mover.innerHTML = data.projects.filter(p=>!p.archived).map(p => `<option value="${p.id}" ${p.id === pid ? 'selected' : ''}>${p.name}</option>`).join('');
+            mover.innerHTML = data.projects.filter(p=>!p.archived).map(p => `<option value="${p.id}" ${sameId(p.id, pid) ? 'selected' : ''}>${p.name}</option>`).join('');
 
             document.getElementById('edit-modal').style.display = 'flex';
         }
