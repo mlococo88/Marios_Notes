@@ -133,7 +133,10 @@ body.col-resizing iframe{pointer-events:none}
 .rte th{background:#f8fafc;font-weight:600;color:#334155;border:1px solid #cbd5e1;padding:7px 10px;text-align:left}
 .rte td{border:1px solid #e2e8f0;padding:7px 10px;color:#1e293b}
 .rte tr:nth-child(even) td{background:#fafafa}
-.rte a{color:var(--accent);text-decoration:underline}
+.rte a{color:var(--accent);text-decoration:underline;cursor:text}
+.rte a:hover{text-decoration:underline;opacity:0.85}
+body.mod-down .rte a{cursor:pointer!important}
+body.mod-down .rte a:hover{background:var(--accent-glow);border-radius:2px}
 .rte code{font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#f1f5f9;padding:1px 5px;border-radius:3px;color:#e11d48}
 .rte pre{background:#1e293b;color:#e2e8f0;padding:14px 16px;border-radius:6px;overflow-x:auto;font-family:'IBM Plex Mono',monospace;font-size:12px;margin:0.8em 0}
 .rte img{max-width:100%;height:auto;border-radius:4px;margin:0.5em 0;border:1px solid #e2e8f0}
@@ -264,7 +267,7 @@ canvas.pdf-page{box-shadow:0 4px 16px rgba(0,0,0,0.15);margin-bottom:16px;displa
 <body>
 <div id="root"></div>
 <script type="text/babel">
-console.log("[LoCoNotes] build 2026-07-13.11");
+console.log("[LoCoNotes] build 2026-07-13.12");
 const {useState,useEffect,useMemo,useRef,useCallback,memo,createContext,useContext}=React;
 const APP_VER='2.0.0';
 const DB_NAME='LoCoNotesV2';
@@ -839,6 +842,28 @@ const RichEditor=React.forwardRef(({content,onChange,engineRef,placeholder='Star
 
   React.useImperativeHandle(ref,()=>elRef.current);
 
+  // While Ctrl/Cmd is held, mark the body so links show a pointer cursor.
+  useEffect(function(){
+    const down=function(e){if(e.ctrlKey||e.metaKey)document.body.classList.add('mod-down');};
+    const up=function(){document.body.classList.remove('mod-down');};
+    window.addEventListener('keydown',down);
+    window.addEventListener('keyup',up);
+    window.addEventListener('blur',up);
+    return function(){window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',up);};
+  },[]);
+  // Ctrl/Cmd+click a link to open it (plain click edits, per contentEditable norms).
+  const handleLinkClick=(e)=>{
+    const a=e.target.closest&&e.target.closest('a');
+    if(!a)return;
+    if(e.ctrlKey||e.metaKey){
+      e.preventDefault();
+      let href=a.getAttribute('href')||'';
+      if(href&&!/^https?:\/\//i.test(href)&&!/^mailto:/i.test(href)){
+        href='https://'+href; // bare domains like www.example.com
+      }
+      if(href)window.open(href,'_blank','noopener');
+    }
+  };
   const handleKeyDown=(e)=>{
     if(e.key==='Tab'){e.preventDefault();engineInst.current?.exec(e.shiftKey?'outdent':'indent');}
     if((e.ctrlKey||e.metaKey)&&e.key==='b'){e.preventDefault();engineInst.current?.bold();}
@@ -853,6 +878,7 @@ const RichEditor=React.forwardRef(({content,onChange,engineRef,placeholder='Star
       data-placeholder={placeholder}
       onInput={e=>onChangeRef.current(e.currentTarget.innerHTML)}
       onKeyDown={handleKeyDown}
+      onClick={handleLinkClick}
       style={{minHeight:'400px'}}/>
   );
 });
